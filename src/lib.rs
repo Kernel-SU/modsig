@@ -37,6 +37,8 @@ pub use signing_block::digest::digest_apk;
 
 pub use apk::Apk;
 pub use signing_block::algorithms::Algorithms;
+#[cfg(feature = "signing")]
+pub use signing_block::algorithms::PrivateKey;
 pub use signing_block::scheme_v2::{SignatureSchemeV2, SIGNATURE_SCHEME_V2_BLOCK_ID};
 pub use signing_block::scheme_v3::{SignatureSchemeV3, SIGNATURE_SCHEME_V3_BLOCK_ID};
 pub use signing_block::{

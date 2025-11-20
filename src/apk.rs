@@ -273,7 +273,7 @@ impl Apk {
         &mut self,
         algo: &Algorithms,
         cert: &[u8],
-        private_key: rsa::RsaPrivateKey,
+        private_key: &crate::signing_block::algorithms::PrivateKey,
     ) -> Result<(), std::io::Error> {
         use crate::{
             common::{
@@ -282,12 +282,9 @@ impl Apk {
             },
             scheme_v2::{SignedData as SignedDataV2, Signer, Signers},
         };
-        use rsa::pkcs8::EncodePublicKey;
-        let public_key = private_key.to_public_key();
-        let pubkey = public_key
-            .to_public_key_der()
+        let pubkey = private_key
+            .public_key_der()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let pubkey = pubkey.into_vec();
         let digest = self.digest(algo)?;
 
         let signed_data = SignedDataV2::new(

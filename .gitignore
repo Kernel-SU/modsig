@@ -2,3 +2,5 @@
 
 *.apk
 !./tests/*.apk
+
+CLAUDE.md

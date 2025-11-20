@@ -47,7 +47,7 @@ mod test {
 
     #[test]
     fn test_sign_with_apk_struct() {
-        use apksig::signing_block::algorithms::Algorithms;
+        use apksig::signing_block::algorithms::{Algorithms, PrivateKey};
 
         use apksig::Apk;
         let file = file!();
@@ -62,9 +62,10 @@ mod test {
         let mut rng = rand::thread_rng(); // rand v0.8.0
         let bits = 512; // force reduce the bits for faster testing
 
-        let private_key = rsa::RsaPrivateKey::new(&mut rng, bits).unwrap();
+        let rsa_key = rsa::RsaPrivateKey::new(&mut rng, bits).unwrap();
+        let private_key = PrivateKey::Rsa(rsa_key);
 
-        apk.sign_v2(&algo, &cert, private_key).unwrap();
+        apk.sign_v2(&algo, &cert, &private_key).unwrap();
 
         let sig = apk.get_signing_block().unwrap();
         let sig_serialized = sig.to_u8();
@@ -75,7 +76,7 @@ mod test {
     #[ignore]
     #[test]
     fn test_sign_from_keystore() {
-        use apksig::signing_block::algorithms::Algorithms;
+        use apksig::signing_block::algorithms::{Algorithms, PrivateKey};
         use rsa::pkcs8::DecodePrivateKey;
 
         use apksig::Apk;
@@ -102,11 +103,12 @@ mod test {
         // let pkcs1_pem = include_str!("../private.key");
         let pkcs1_pem = "";
 
-        let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pkcs1_pem).unwrap();
+        let rsa_key = rsa::RsaPrivateKey::from_pkcs8_pem(pkcs1_pem).unwrap();
+        let private_key = PrivateKey::Rsa(rsa_key);
 
         // this method will generate a new signature block inside the Apk struct
         // therefore the Apk struct need to be mutable
-        apk.sign_v2(&algo, &cert, private_key).unwrap();
+        apk.sign_v2(&algo, &cert, &private_key).unwrap();
 
         // the Apk struct has now a signing block
         let sig = apk.get_signing_block().unwrap();

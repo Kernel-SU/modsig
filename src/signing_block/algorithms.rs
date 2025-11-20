@@ -165,44 +165,77 @@ impl Algorithms {
     /// Returns an error if the signature is invalid
     #[cfg(feature = "signing")]
     pub fn verify(&self, pubkey: &[u8], raw_data: &[u8], signature: &[u8]) -> Result<(), String> {
-        use rsa::pkcs8::DecodePublicKey;
         use rsa::sha2::{Sha256, Sha512};
-        use rsa::{Pkcs1v15Sign, RsaPublicKey};
-        let key = match RsaPublicKey::from_public_key_der(pubkey) {
-            Ok(key) => key,
-            Err(_) => return Err("Invalid public key".to_string()),
-        };
         let data = self.hash(raw_data);
         match &self {
             Self::RSASSA_PKCS1_v1_5_256 => {
+                use rsa::pkcs8::DecodePublicKey;
+                use rsa::{Pkcs1v15Sign, RsaPublicKey};
+                let key = RsaPublicKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid RSA public key".to_string())?;
                 let pkcs = Pkcs1v15Sign::new::<Sha256>();
-                match key.verify(pkcs, &data, signature) {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err("Invalid signature".to_string()),
-                }
+                key.verify(pkcs, &data, signature)
+                    .map_err(|_| "Invalid signature".to_string())
             }
             Self::RSASSA_PKCS1_v1_5_512 => {
+                use rsa::pkcs8::DecodePublicKey;
+                use rsa::{Pkcs1v15Sign, RsaPublicKey};
+                let key = RsaPublicKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid RSA public key".to_string())?;
                 let pkcs = Pkcs1v15Sign::new::<Sha512>();
-                match key.verify(pkcs, &data, signature) {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err("Invalid signature".to_string()),
-                }
+                key.verify(pkcs, &data, signature)
+                    .map_err(|_| "Invalid signature".to_string())
             }
             Self::RSASSA_PSS_256 => {
+                use rsa::pkcs8::DecodePublicKey;
+                use rsa::RsaPublicKey;
+                let key = RsaPublicKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid RSA public key".to_string())?;
                 let pkcs = rsa::pss::Pss::new::<Sha256>();
-                match key.verify(pkcs, &data, signature) {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err("Invalid signature".to_string()),
-                }
+                key.verify(pkcs, &data, signature)
+                    .map_err(|_| "Invalid signature".to_string())
             }
             Self::RSASSA_PSS_512 => {
+                use rsa::pkcs8::DecodePublicKey;
+                use rsa::RsaPublicKey;
+                let key = RsaPublicKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid RSA public key".to_string())?;
                 let pkcs = rsa::pss::Pss::new::<Sha512>();
-                match key.verify(pkcs, &data, signature) {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err("Invalid signature".to_string()),
-                }
+                key.verify(pkcs, &data, signature)
+                    .map_err(|_| "Invalid signature".to_string())
             }
-            _ => Err("Not implemented".to_string()),
+            Self::ECDSA_SHA2_256 => {
+                use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+                use p256::pkcs8::DecodePublicKey;
+                let key = VerifyingKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid ECDSA P-256 public key".to_string())?;
+                let sig = Signature::from_der(signature)
+                    .map_err(|_| "Invalid ECDSA signature format".to_string())?;
+                key.verify(&data, &sig)
+                    .map_err(|_| "Invalid signature".to_string())
+            }
+            Self::ECDSA_SHA2_512 => {
+                use p384::ecdsa::{signature::Verifier, Signature, VerifyingKey};
+                use p384::pkcs8::DecodePublicKey;
+                let key = VerifyingKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid ECDSA P-384 public key".to_string())?;
+                let sig = Signature::from_der(signature)
+                    .map_err(|_| "Invalid ECDSA signature format".to_string())?;
+                key.verify(&data, &sig)
+                    .map_err(|_| "Invalid signature".to_string())
+            }
+            Self::DSA_SHA2_256 => {
+                use dsa::pkcs8::der::Decode;
+                use dsa::pkcs8::DecodePublicKey;
+                use dsa::{signature::Verifier, Signature, VerifyingKey};
+                let key = VerifyingKey::from_public_key_der(pubkey)
+                    .map_err(|_| "Invalid DSA public key".to_string())?;
+                let sig = Signature::from_der(signature)
+                    .map_err(|_| "Invalid DSA signature format".to_string())?;
+                key.verify(&data, &sig)
+                    .map_err(|_| "Invalid signature".to_string())
+            }
+            Self::Unknown(_) => Err("Unknown algorithm".to_string()),
         }
     }
 
@@ -210,38 +243,107 @@ impl Algorithms {
     /// # Errors
     /// Returns a string if the signing fails.
     #[cfg(feature = "signing")]
-    pub fn sign(
-        &self,
-        private_key: rsa::RsaPrivateKey,
-        raw_data: &[u8],
-    ) -> Result<Vec<u8>, String> {
+    pub fn sign(&self, private_key: &PrivateKey, raw_data: &[u8]) -> Result<Vec<u8>, String> {
         let hashed = &self.hash(raw_data);
-        match &self {
-            Self::RSASSA_PKCS1_v1_5_256 => {
+        match (&self, private_key) {
+            (Self::RSASSA_PKCS1_v1_5_256, PrivateKey::Rsa(key)) => {
                 use rsa::sha2::Sha256;
                 use rsa::Pkcs1v15Sign;
                 let pkcs = Pkcs1v15Sign::new::<Sha256>();
-                private_key.sign(pkcs, hashed).map_err(|e| e.to_string())
+                key.sign(pkcs, hashed).map_err(|e| e.to_string())
             }
-            Self::RSASSA_PKCS1_v1_5_512 => {
+            (Self::RSASSA_PKCS1_v1_5_512, PrivateKey::Rsa(key)) => {
                 use rsa::sha2::Sha512;
                 use rsa::Pkcs1v15Sign;
                 let pkcs = Pkcs1v15Sign::new::<Sha512>();
-                private_key.sign(pkcs, hashed).map_err(|e| e.to_string())
+                key.sign(pkcs, hashed).map_err(|e| e.to_string())
             }
-            Self::RSASSA_PSS_256 => {
+            (Self::RSASSA_PSS_256, PrivateKey::Rsa(key)) => {
                 use rsa::pss::Pss;
                 use rsa::sha2::Sha256;
                 let pkcs = Pss::new::<Sha256>();
-                private_key.sign(pkcs, hashed).map_err(|e| e.to_string())
+                key.sign(pkcs, hashed).map_err(|e| e.to_string())
             }
-            Self::RSASSA_PSS_512 => {
+            (Self::RSASSA_PSS_512, PrivateKey::Rsa(key)) => {
                 use rsa::pss::Pss;
                 use rsa::sha2::Sha512;
                 let pkcs = Pss::new::<Sha512>();
-                private_key.sign(pkcs, hashed).map_err(|e| e.to_string())
+                key.sign(pkcs, hashed).map_err(|e| e.to_string())
             }
-            _ => Err("Not implemented".to_string()),
+            (Self::ECDSA_SHA2_256, PrivateKey::EcdsaP256(key)) => {
+                use p256::ecdsa::{signature::Signer, Signature};
+                let sig: Signature = key.sign(hashed);
+                Ok(sig.to_der().as_bytes().to_vec())
+            }
+            (Self::ECDSA_SHA2_512, PrivateKey::EcdsaP384(key)) => {
+                use p384::ecdsa::{signature::Signer, Signature};
+                let sig: Signature = key.sign(hashed);
+                Ok(sig.to_der().as_bytes().to_vec())
+            }
+            (Self::DSA_SHA2_256, PrivateKey::Dsa(key)) => {
+                use dsa::pkcs8::der::Encode;
+                use dsa::{signature::Signer, Signature};
+                let sig: Signature = key.sign(hashed);
+                sig.to_der()
+                    .map_err(|e| e.to_string())
+            }
+            _ => Err("Algorithm and key type mismatch".to_string()),
+        }
+    }
+}
+
+/// Private key types for signing
+#[cfg(feature = "signing")]
+pub enum PrivateKey {
+    /// RSA private key
+    Rsa(rsa::RsaPrivateKey),
+    /// ECDSA P-256 signing key
+    EcdsaP256(p256::ecdsa::SigningKey),
+    /// ECDSA P-384 signing key
+    EcdsaP384(p384::ecdsa::SigningKey),
+    /// DSA signing key
+    Dsa(dsa::SigningKey),
+}
+
+#[cfg(feature = "signing")]
+impl PrivateKey {
+    /// Get the public key bytes in DER format
+    /// # Errors
+    /// Returns an error if the public key cannot be encoded
+    pub fn public_key_der(&self) -> Result<Vec<u8>, String> {
+        use rsa::pkcs8::EncodePublicKey;
+        match self {
+            Self::Rsa(key) => {
+                let public_key = key.to_public_key();
+                public_key
+                    .to_public_key_der()
+                    .map(|der| der.into_vec())
+                    .map_err(|e| e.to_string())
+            }
+            Self::EcdsaP256(key) => {
+                use p256::pkcs8::EncodePublicKey as _;
+                let public_key = key.verifying_key();
+                public_key
+                    .to_public_key_der()
+                    .map(|der| der.into_vec())
+                    .map_err(|e| e.to_string())
+            }
+            Self::EcdsaP384(key) => {
+                use p384::pkcs8::EncodePublicKey as _;
+                let public_key = key.verifying_key();
+                public_key
+                    .to_public_key_der()
+                    .map(|der| der.into_vec())
+                    .map_err(|e| e.to_string())
+            }
+            Self::Dsa(key) => {
+                use dsa::pkcs8::EncodePublicKey as _;
+                let public_key = key.verifying_key();
+                public_key
+                    .to_public_key_der()
+                    .map(|der| der.into_vec())
+                    .map_err(|e| e.to_string())
+            }
         }
     }
 }
