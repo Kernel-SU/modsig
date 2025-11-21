@@ -17,9 +17,9 @@ use crate::{digest_apk, Algorithms};
 #[cfg(feature = "signing")]
 use crate::ValueSigningBlock;
 
-/// The `Apk` struct represents the APK file.
+/// The `Module` struct represents the APK file.
 #[derive(Default)]
-pub struct Apk {
+pub struct Module {
     /// If the APK is raw (not signed)
     pub raw: bool,
 
@@ -33,7 +33,7 @@ pub struct Apk {
     pub sig: Option<SigningBlock>,
 }
 
-impl Apk {
+impl Module {
     /// Create a new APK file.
     /// # Errors
     /// Returns an error if the path is not found.

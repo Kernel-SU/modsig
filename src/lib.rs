@@ -25,7 +25,7 @@
 )]
 #![warn(clippy::multiple_crate_versions)]
 
-pub mod apk;
+pub mod module;
 pub mod common;
 pub mod signing_block;
 pub mod utils;
@@ -35,7 +35,7 @@ pub mod zip;
 #[cfg(feature = "hash")]
 pub use signing_block::digest::digest_apk;
 
-pub use apk::Apk;
+pub use module::Module;
 pub use signing_block::algorithms::Algorithms;
 #[cfg(feature = "signing")]
 pub use signing_block::algorithms::PrivateKey;
