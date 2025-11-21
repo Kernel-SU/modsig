@@ -1,4 +1,4 @@
-//! Module for the APK Signing Block
+//! Module for the KSU Signing Block
 //! <https://source.android.com/docs/security/features/apksigning>
 
 use std::io::Read;
@@ -21,8 +21,8 @@ use crate::utils::print_string;
 use crate::utils::{add_space, MyReader};
 use scheme_v2::{SignatureSchemeV2, Signers as SignersV2, SIGNATURE_SCHEME_V2_BLOCK_ID};
 
-/// Magic number of the APK Signing Block
-pub const MAGIC: &[u8; 16] = b"APK Sig Block 42";
+/// Magic number of the KSU Signing Block
+pub const MAGIC: &[u8; 16] = b"KSU Sig Block 42";
 
 /// Length of the magic number
 pub const MAGIC_LEN: usize = MAGIC.len();
@@ -39,7 +39,7 @@ pub const PROOF_OF_ROTATION_ATTR_ID: u32 = 0x9d63_03f7;
 /// Size of a u64
 const SIZE_UINT64: usize = mem::size_of::<u64>();
 
-/// Raw data extracted from the APK Signing Block
+/// Raw data extracted from the KSU Signing Block
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct RawData {
@@ -72,7 +72,7 @@ impl RawData {
     }
 }
 
-/// Value of the APK Signing Block
+/// Value of the KSU Signing Block
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ValueSigningBlock {
@@ -169,7 +169,7 @@ impl ValueSigningBlock {
     }
 }
 
-/// APK Signing Block
+/// KSU Signing Block
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SigningBlock {
@@ -250,7 +250,7 @@ impl SigningBlock {
         })
     }
 
-    /// Extract the APK Signing Block from the APK file
+    /// Extract the KSU Signing Block from the APK file
     /// # Errors
     /// Return an error appends during decoding
     pub fn from_reader<R: Read + Seek>(
@@ -323,7 +323,7 @@ impl SigningBlock {
         ))
     }
 
-    /// Parse the APK Signing Block from a byte array
+    /// Parse the KSU Signing Block from a byte array
     /// # Errors
     /// Return an error appends during decoding
     fn parse_full_block(data: &[u8]) -> Result<Self, String> {
@@ -409,7 +409,7 @@ impl SigningBlock {
         })
     }
 
-    /// Extract the APK Signing Block from the APK file
+    /// Extract the KSU Signing Block from the APK file
     /// # Errors
     /// Return an error appends during decoding
     pub fn from_u8(data: &[u8]) -> Result<Self, String> {
@@ -473,7 +473,7 @@ impl SigningBlock {
         ))
     }
 
-    /// Extract the values from the APK Signing Block
+    /// Extract the values from the KSU Signing Block
     /// # Errors
     /// Return an error appends during decoding
     fn extract_values(data: &mut MyReader) -> Result<Vec<ValueSigningBlock>, String> {

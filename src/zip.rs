@@ -143,14 +143,14 @@ pub(crate) fn create_fixed_buffer_2(buf: &[u8]) -> [u8; 2] {
 ///
 /// <https://source.android.com/docs/security/features/apksigning/v2>
 ///
-/// |       Content of ZIP entries      | APK Signing Block |      Central Directory      |     End of Central Directory      |
+/// |       Content of ZIP entries      | KSU Signing Block |      Central Directory      |     End of Central Directory      |
 /// |-----------------------------------|-------------------|-----------------------------|-----------------------------------|
 /// | `start_content` -> `stop_content` |                   | `start_cd`   ->   `stop_cd` | `start_eocd`    ->    `stop_eocd` |
 ///
 /// Some fields are the same as the others, but they are separated for clarity:
 ///
 /// - [`FileOffsets::stop_cd`] and [`FileOffsets::start_eocd`] are generally the same
-/// - [`FileOffsets::stop_content`] and [`FileOffsets::start_cd`] are the same if there is no APK Signing Block
+/// - [`FileOffsets::stop_content`] and [`FileOffsets::start_cd`] are the same if there is no KSU Signing Block
 #[derive(Debug)]
 pub struct FileOffsets {
     /// Start index of content

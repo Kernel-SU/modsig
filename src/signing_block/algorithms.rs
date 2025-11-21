@@ -1,4 +1,4 @@
-//! Signatures for APK Signing Block
+//! Signatures for KSU Signing Block
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

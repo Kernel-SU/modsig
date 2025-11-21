@@ -2,7 +2,7 @@
 name = "apksig"
 version = "0.3.0"
 edition = "2021"
-description = "Decoding the APK Signing Block"
+description = "Decoding the KSU Signing Block"
 documentation = "https://docs.rs/apksig"
 license = "MIT"
 readme = "./README.md"
@@ -38,13 +38,13 @@ x509-parser = { version = "0.17.0" }
 # used mostly for main.rs
 default = ["directprint", "serde", "hash", "signing"]
 
-# verify the APK Signing Block
+# verify the KSU Signing Block
 signing = ["hash", "dep:p256", "dep:p384"]
 
 # allows to serialize and deserialize structs with serde
 serde = ["dep:serde"]
 
-# print the APK Signing Block while parsing
+# print the KSU Signing Block while parsing
 directprint = []
 
 # allows to calculate the hash of Certificate

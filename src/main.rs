@@ -43,14 +43,14 @@ fn main() {
     match SigningBlock::from_reader(reader, file_len, 0) {
         Ok(sig_block) => {
             println!(
-                "APK Signing Block is between {} and {} with a size of {} bytes",
+                "KSU Signing Block is between {} and {} with a size of {} bytes",
                 sig_block.file_offset_start,
                 sig_block.file_offset_end,
                 sig_block.size_of_block_start + 8
             );
         }
         Err(e) => {
-            eprintln!("Error parsing APK Signing Block: {:?}", e);
+            eprintln!("Error parsing KSU Signing Block: {:?}", e);
             std::process::exit(1);
         }
     }

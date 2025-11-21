@@ -1,5 +1,5 @@
-//! # APK Signing Block
-//! This library is used to extract the APK Signing Block from an APK file.
+//! # KSU Signing Block
+//! This library is used to extract the KSU Signing Block from an APK file.
 //!
 //! CLI usage:
 //! ```shell

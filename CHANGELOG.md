@@ -26,7 +26,7 @@
 ## `0.2.7`
 
 - change function from `&mut File` to `<R: Read + Seek>` for more flexibility (use a `Cursor` for `Vec<u8>`)
-- add a test to digest a raw apk (without the APK Signing block)
+- add a test to digest a raw apk (without the KSU Signing Block)
 
 ## `0.2.6`
 
