@@ -7,9 +7,15 @@ use std::mem;
 use serde::{Deserialize, Serialize};
 
 use crate::add_space;
-use crate::common::{AdditionalAttributes, Certificates, Digests, PubKey, Signatures};
+use crate::common::{
+    AdditionalAttribute, AdditionalAttributes, Certificate, Certificates, Digest, Digests, PubKey,
+    Signature, Signatures,
+};
 use crate::utils::print_string;
 use crate::MyReader;
+
+#[cfg(feature = "signing")]
+use crate::signing_block::algorithms::{Algorithms, PrivateKey};
 
 /// Source Stamp Block ID (V2)
 pub const SOURCE_STAMP_BLOCK_ID: u32 = 0x6dff_800d;
@@ -197,5 +203,181 @@ impl SignedData {
             + self.certificates.size
             + self.additional_attributes.size
             + mem::size_of::<u32>() * 3 // size prefixes for each component
+    }
+}
+
+/// Configuration for Source Stamp signing
+#[cfg(feature = "signing")]
+pub struct SourceStampSignerConfig {
+    /// The private key used for signing
+    pub private_key: PrivateKey,
+    /// The certificate (DER encoded)
+    pub certificate: Vec<u8>,
+    /// The signature algorithm to use
+    pub algorithm: Algorithms,
+    /// Whether to include timestamp attribute
+    pub timestamp_enabled: bool,
+}
+
+#[cfg(feature = "signing")]
+impl SourceStampSignerConfig {
+    /// Create a new signer config
+    pub const fn new(
+        private_key: PrivateKey,
+        certificate: Vec<u8>,
+        algorithm: Algorithms,
+        timestamp_enabled: bool,
+    ) -> Self {
+        Self {
+            private_key,
+            certificate,
+            algorithm,
+            timestamp_enabled,
+        }
+    }
+}
+
+/// Source Stamp Signer for generating signed Source Stamp blocks
+#[cfg(feature = "signing")]
+pub struct SourceStampSigner {
+    /// Signer configuration
+    config: SourceStampSignerConfig,
+}
+
+#[cfg(feature = "signing")]
+impl SourceStampSigner {
+    /// Create a new Source Stamp Signer
+    pub const fn new(config: SourceStampSignerConfig) -> Self {
+        Self { config }
+    }
+
+    /// Generate a signed Source Stamp block
+    ///
+    /// # Arguments
+    /// * `digests` - The digests to include in the signed data
+    ///
+    /// # Returns
+    /// A complete `SourceStamp` with signatures
+    ///
+    /// # Errors
+    /// Returns an error if signing fails
+    pub fn sign(&self, digests: Digests) -> Result<SourceStamp, String> {
+        // Create certificates from the signer's certificate
+        let certificates = Certificates::new(vec![Certificate::new(self.config.certificate.clone())]);
+
+        // Create additional attributes
+        let mut additional_attrs_data = Vec::new();
+
+        // Add timestamp attribute if enabled
+        if self.config.timestamp_enabled {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("Failed to get timestamp: {}", e))?
+                .as_secs();
+
+            let mut timestamp_bytes = timestamp.to_le_bytes().to_vec();
+            // Ensure we have exactly 8 bytes
+            timestamp_bytes.resize(8, 0);
+
+            additional_attrs_data.push(AdditionalAttribute {
+                size: mem::size_of::<u32>() + timestamp_bytes.len(),
+                id: STAMP_TIME_ATTR_ID,
+                data: timestamp_bytes,
+            });
+        }
+
+        let additional_attributes = AdditionalAttributes::new(additional_attrs_data);
+
+        // Create signed data
+        let signed_data = SignedData::new(digests, certificates, additional_attributes);
+
+        // Get the raw bytes of signed data for signing (without the size prefix)
+        let signed_data_bytes = signed_data.to_u8();
+        // Skip the first 4 bytes (size prefix) when signing
+        let data_to_sign = signed_data_bytes
+            .get(4..)
+            .ok_or("Invalid signed data")?;
+
+        // Sign the data
+        let signature_bytes = self.config.algorithm.sign(&self.config.private_key, data_to_sign)?;
+
+        // Create signatures
+        let signatures = Signatures::new(vec![Signature::new(
+            self.config.algorithm.clone(),
+            signature_bytes,
+        )]);
+
+        // Get public key
+        let public_key_der = self.config.private_key.public_key_der()?;
+        let public_key = PubKey::new(public_key_der);
+
+        // Create stamp block
+        let stamp_block = StampBlock::new(signed_data, signatures, public_key);
+
+        // Create and return the source stamp
+        Ok(SourceStamp::new(stamp_block))
+    }
+
+    /// Generate a signed Source Stamp block from raw digest data
+    ///
+    /// This is a convenience method that creates digests from algorithm-digest pairs
+    ///
+    /// # Arguments
+    /// * `digest_pairs` - Vector of (algorithm, digest_bytes) pairs
+    ///
+    /// # Returns
+    /// A complete `SourceStamp` with signatures
+    ///
+    /// # Errors
+    /// Returns an error if signing fails
+    pub fn sign_with_digests(&self, digest_pairs: Vec<(Algorithms, Vec<u8>)>) -> Result<SourceStamp, String> {
+        let digests_data: Vec<Digest> = digest_pairs
+            .into_iter()
+            .map(|(algo, digest)| Digest::new(algo, digest))
+            .collect();
+        let digests = Digests::new(digests_data);
+        self.sign(digests)
+    }
+}
+
+/// Builder for creating Source Stamp Signer with optional configurations
+#[cfg(feature = "signing")]
+pub struct SourceStampSignerBuilder {
+    /// The private key used for signing
+    private_key: PrivateKey,
+    /// The certificate (DER encoded)
+    certificate: Vec<u8>,
+    /// The signature algorithm to use
+    algorithm: Algorithms,
+    /// Whether to include timestamp attribute
+    timestamp_enabled: bool,
+}
+
+#[cfg(feature = "signing")]
+impl SourceStampSignerBuilder {
+    /// Create a new builder with required parameters
+    pub const fn new(private_key: PrivateKey, certificate: Vec<u8>, algorithm: Algorithms) -> Self {
+        Self {
+            private_key,
+            certificate,
+            algorithm,
+            timestamp_enabled: true, // Default to enabled like Java implementation
+        }
+    }
+
+    /// Set whether timestamp should be enabled
+    pub const fn timestamp_enabled(mut self, enabled: bool) -> Self {
+        self.timestamp_enabled = enabled;
+        self
+    }
+
+    /// Build the SourceStampSigner
+    pub fn build(self) -> SourceStampSigner {
+        SourceStampSigner::new(SourceStampSignerConfig::new(
+            self.private_key,
+            self.certificate,
+            self.algorithm,
+            self.timestamp_enabled,
+        ))
     }
 }
