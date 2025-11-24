@@ -6,36 +6,36 @@ pub mod info;
 pub mod sign;
 pub mod verify;
 
-/// KSU Module签名工具
+/// KSU Module signing tool
 #[derive(Parser)]
 #[command(name = "modsig")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// 子命令
+    /// Subcommand
     #[command(subcommand)]
     pub command: Commands,
 }
 
-/// 可用的命令
+/// Available commands
 #[derive(Subcommand)]
 pub enum Commands {
-    /// 对模块进行签名
+    /// Sign a module
     Sign(Box<sign::SignArgs>),
 
-    /// 验证模块签名
+    /// Verify module signature
     Verify(verify::VerifyArgs),
 
-    /// 显示签名块信息
+    /// Display signing block information
     Info(info::InfoArgs),
 }
 
 impl Cli {
-    /// 解析命令行参数
+    /// Parse command-line arguments
     pub fn parse_args() -> Self {
         Self::parse()
     }
 
-    /// 执行命令
+    /// Execute command
     pub fn execute(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
             Commands::Sign(args) => sign::execute(*args),
