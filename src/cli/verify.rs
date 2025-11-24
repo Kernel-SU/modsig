@@ -5,6 +5,8 @@ use modsig::{Module, SignatureVerifier, TrustedRoots, VerifyError};
 use std::fs;
 use std::path::PathBuf;
 
+use super::cert::{describe_certificate, describe_chain};
+
 /// Arguments for the verify command
 #[derive(Args)]
 pub struct VerifyArgs {
@@ -76,26 +78,27 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         Some(result) => {
             if result.signature_valid {
                 println!("✓ V2 signature verification passed");
-                if args.verbose {
-                    println!("  Signature valid: {}", result.signature_valid);
-                    println!("  Certificate chain valid: {}", result.cert_chain_valid);
-                    println!("  Trusted: {}", result.is_trusted);
-                    if let Some(ref cert) = result.certificate {
-                        println!("  Certificate size: {} bytes", cert.len());
+                println!("  Certificate chain valid: {}", result.cert_chain_valid);
+                println!("  Trusted: {}", result.is_trusted);
+                if let Some(ref cert) = result.certificate {
+                    println!(
+                        "  Leaf certificate: {} bytes; {}",
+                        cert.len(),
+                        describe_certificate(cert)
+                    );
+                }
+                if !result.cert_chain.is_empty() {
+                    println!("  Certificate chain: {} certificate(s)", result.cert_chain.len());
+                    for line in describe_chain(&result.cert_chain) {
+                        println!("    {}", line);
                     }
-                    if !result.cert_chain.is_empty() {
-                        println!("  Certificate chain: {} certificate(s)", result.cert_chain.len());
-                        for (idx, chain_cert) in result.cert_chain.iter().enumerate() {
-                            println!("    Chain[{}]: {} bytes", idx, chain_cert.len());
-                        }
-                    } else {
-                        println!("  Certificate chain: none (self-signed or single cert)");
-                    }
-                    if !result.warnings.is_empty() {
-                        println!("  Warnings:");
-                        for warning in &result.warnings {
-                            println!("    ⚠ {}", warning);
-                        }
+                } else {
+                    println!("  Certificate chain: none (self-signed or single cert)");
+                }
+                if !result.warnings.is_empty() {
+                    println!("  Warnings:");
+                    for warning in &result.warnings {
+                        println!("    ⚠ {}", warning);
                     }
                 }
             } else {
@@ -119,10 +122,15 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         Some(result) => {
             if result.signature_valid {
                 println!("✓ Source Stamp verification passed");
-                if args.verbose {
-                    println!("  Signature valid: {}", result.signature_valid);
-                    println!("  Certificate chain valid: {}", result.cert_chain_valid);
-                    println!("  Trusted: {}", result.is_trusted);
+                println!("  Signature valid: {}", result.signature_valid);
+                println!("  Certificate chain valid: {}", result.cert_chain_valid);
+                println!("  Trusted: {}", result.is_trusted);
+                if let Some(ref cert) = result.certificate {
+                    println!(
+                        "  Stamp certificate: {} bytes; {}",
+                        cert.len(),
+                        describe_certificate(cert)
+                    );
                 }
             } else {
                 eprintln!("⚠ Source Stamp verification failed");
@@ -130,9 +138,7 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         None => {
-            if args.verbose {
-                println!("ℹ Source Stamp not found");
-            }
+            println!("ℹ Source Stamp not found");
         }
     }
 

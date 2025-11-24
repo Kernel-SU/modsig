@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 pub mod info;
 pub mod sign;
 pub mod verify;
+pub mod cert;
 
 /// KSU Module signing tool
 #[derive(Parser)]
