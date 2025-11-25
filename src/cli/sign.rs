@@ -53,10 +53,6 @@ pub struct SignArgs {
     /// Source Stamp P12 password
     #[arg(long = "stamp-password")]
     pub stamp_password: Option<String>,
-
-    /// Signature algorithm (ecdsa256 or ecdsa384)
-    #[arg(long, default_value = "ecdsa256")]
-    pub algorithm: String,
 }
 
 /// Execute the sign command
@@ -149,12 +145,12 @@ pub fn execute(args: SignArgs) -> Result<(), Box<dyn std::error::Error>> {
         stop_eocd: input_len,
     };
 
-    // Select algorithm
-    let algorithm = match args.algorithm.as_str() {
-        "ecdsa256" => Algorithms::ECDSA_SHA2_256,
-        "ecdsa384" => Algorithms::ECDSA_SHA2_512,
-        _ => return Err(format!("Unsupported algorithm: {}", args.algorithm).into()),
-    };
+    // Select algorithm based on V2 private key curve
+    let algorithm = v2_creds.algorithm.clone();
+    println!(
+        "ℹ 自动使用密钥曲线对应算法: {}",
+        algorithm
+    );
 
     // Calculate digests
     println!("Calculating digests...");
