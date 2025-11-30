@@ -91,5 +91,3 @@ pub use verifier::{
     SignatureVerifier, SignerVerifyResult, TrustedRoots, VerifyAllResult, VerifyError, VerifyResult,
 };
 
-// shortcuts
-use utils::add_space;

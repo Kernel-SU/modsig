@@ -5,14 +5,7 @@ use std::mem;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "directprint")]
-use crate::utils::MagicNumberDecoder;
-
-use crate::{
-    add_space,
-    signing_block::algorithms::Algorithms,
-    utils::{print_hexe, print_string, MyReader},
-};
+use crate::{signing_block::algorithms::Algorithms, utils::MyReader};
 
 /// The `Digest` struct represents the digest of the signed data.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,26 +37,10 @@ impl Digest {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(16);
-        #[cfg(feature = "directprint")]
-        print_string!("digest_size: {}", size);
         let signature_algorithm_id = data.read_u32()?;
         let algo = Algorithms::from(signature_algorithm_id);
-        add_space!(20);
-        #[cfg(feature = "directprint")]
-        print_string!(
-            "signature_algorithm_id: {} {}",
-            signature_algorithm_id,
-            algo
-        );
         let digest_size = data.read_size()?;
-        add_space!(20);
-        #[cfg(feature = "directprint")]
-        print_string!("digest_size: {}", digest_size);
         let digest = data.get_to(digest_size)?.to_vec();
-        add_space!(20);
-        #[cfg(feature = "directprint")]
-        print_hexe("digest", &digest);
         Ok(Self {
             size,
             signature_algorithm_id: algo,
@@ -119,9 +96,6 @@ impl Digests {
             size: size_digests,
             digests_data: Vec::new(),
         };
-        add_space!(12);
-        #[cfg(feature = "directprint")]
-        print_string!("size_digests: {}", size_digests);
         let data = &mut data.as_slice(size_digests)?;
         let max_pos_digests = data.get_pos() + size_digests;
         while data.get_pos() < max_pos_digests {
@@ -179,8 +153,6 @@ impl Certificates {
             size: size_certificates,
             certificates_data: Vec::new(),
         };
-        add_space!(12);
-        print_string!("size_certificates: {}", size_certificates);
         let pos_max_cert = data.get_pos() + size_certificates;
         while data.get_pos() < pos_max_cert {
             certificates
@@ -255,11 +227,7 @@ impl Certificate {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(16);
-        print_string!("certificate_size: {}", size);
         let certificate = data.get_to(size)?.to_vec();
-        add_space!(16);
-        print_hexe("certificate", &certificate);
         Ok(Self { size, certificate })
     }
 
@@ -304,8 +272,6 @@ impl Signatures {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(8);
-        print_string!("signatures_size: {}", size);
         let mut signatures = Self {
             size,
             signatures_data: Vec::new(),
@@ -366,22 +332,10 @@ impl Signature {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(12);
-        print_string!("signature_size: {}", size);
         let signature_algorithm_id = data.read_u32()?;
         let algo = Algorithms::from(signature_algorithm_id);
-        add_space!(12);
-        print_string!(
-            "signature_algorithm_id: {} {}",
-            signature_algorithm_id,
-            algo
-        );
         let signature_size = data.read_size()?;
-        add_space!(12);
-        print_string!("signature_size: {}", signature_size);
         let signature = data.get_to(signature_size)?.to_vec();
-        add_space!(12);
-        print_hexe("signature", &signature);
         Ok(Self {
             size,
             signature_algorithm_id: algo,
@@ -440,8 +394,6 @@ impl AdditionalAttributes {
             size: size_additional_attributes,
             additional_attributes_data: Vec::new(),
         };
-        add_space!(12);
-        print_string!("size_additional_attributes: {}", size_additional_attributes);
         let max_pos_attributes = data.get_pos() + size_additional_attributes;
         while data.get_pos() < max_pos_attributes {
             additional_attributes
@@ -486,19 +438,12 @@ impl AdditionalAttribute {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(16);
-        print_string!("tiny_raw_data_size: {}", size);
         let id = data.read_u32()?;
-        add_space!(20);
-        #[cfg(feature = "directprint")]
-        println!("id: {} {}", id, MagicNumberDecoder::Normal(id));
         let data_size = match size.checked_sub(4) {
             Some(size) => size,
             None => return Err("Invalid size".to_string()),
         };
         let data = data.get_to(data_size)?.to_vec();
-        add_space!(20);
-        print_hexe("data", &data);
         Ok(Self { size, id, data })
     }
     /// Serialize to u8
@@ -538,11 +483,7 @@ impl PubKey {
     /// Returns a string if the data is not valid.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size = data.read_size()?;
-        add_space!(8);
-        print_string!("pub_key_length: {}", size);
-        add_space!(12);
         let data = data.get_to(size)?.to_vec();
-        print_hexe("pub_key", &data);
         Ok(Self { size, data })
     }
 

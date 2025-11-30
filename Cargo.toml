@@ -52,9 +52,8 @@ x509-parser = { version = "0.17.0" }
 tempfile = "3"
 
 [features]
-# by default, very opinionated features are enabled
-# used mostly for main.rs
-default = ["directprint", "serde", "hash", "signing", "keystore", "verify", "elf"]
+# by default, all features are enabled
+default = ["serde", "hash", "signing", "keystore", "verify", "elf"]
 
 # verify the KSU Signing Block
 signing = ["hash", "dep:p256", "dep:p384"]
@@ -69,9 +68,6 @@ verify = ["signing", "dep:x509-cert", "dep:rustls-webpki", "dep:rustls-pki-types
 
 # allows to serialize and deserialize structs with serde
 serde = ["dep:serde"]
-
-# print the KSU Signing Block while parsing
-directprint = []
 
 # allows to calculate the hash of Certificate
 # provides the functions sha1_cert(), sha256_cert(), md5_cert() for the Certificate struct

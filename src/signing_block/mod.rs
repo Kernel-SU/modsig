@@ -17,12 +17,7 @@ pub mod source_stamp;
 #[cfg(feature = "elf")]
 pub mod elf_section_info;
 
-use crate::utils::create_fixed_buffer_8;
-#[cfg(feature = "directprint")]
-use crate::utils::MagicNumberDecoder;
-
-use crate::utils::print_string;
-use crate::utils::{add_space, MyReader};
+use crate::utils::{create_fixed_buffer_8, MyReader};
 #[cfg(feature = "elf")]
 use elf_section_info::{ElfSectionInfo, ELF_SECTION_INFO_BLOCK_ID};
 use scheme_v2::{SignatureSchemeV2, Signers as SignersV2, SIGNATURE_SCHEME_V2_BLOCK_ID};
@@ -39,6 +34,13 @@ pub const VERITY_PADDING_BLOCK_ID: u32 = 0x4272_6577;
 
 /// Size of a u64
 const SIZE_UINT64: usize = mem::size_of::<u64>();
+
+/// Maximum allowed signing block size (16 KB) to prevent DoS attacks
+/// KSU signing blocks are typically small (a few KB)
+const MAX_SIGNING_BLOCK_SIZE: usize = 16 * 1024;
+
+/// Maximum allowed sub-block (pair) size (16 KB) to prevent DoS attacks
+const MAX_PAIR_SIZE: usize = 16 * 1024;
 
 /// Raw data extracted from the KSU Signing Block
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,14 +137,16 @@ impl ValueSigningBlock {
     /// Returns a string if the parsing fails.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let pair_size = data.read_size_u64()?;
-        print_string!("Pair size: {} bytes", pair_size);
+
+        // Security check: prevent DoS via extremely large pair size
+        if pair_size > MAX_PAIR_SIZE {
+            return Err(format!(
+                "Pair size {} exceeds maximum allowed size {} (potential DoS attack)",
+                pair_size, MAX_PAIR_SIZE
+            ));
+        }
 
         let pair_id = data.read_u32()?;
-        print_string!(
-            "Pair ID: {} {}",
-            pair_id,
-            MagicNumberDecoder::Normal(pair_id)
-        );
 
         let value_length = match pair_size.checked_sub(4) {
             Some(v) => v,
@@ -155,7 +159,6 @@ impl ValueSigningBlock {
         };
         let block_value = &mut data.as_slice(value_length)?;
 
-        print_string!("Pair Content:");
         let block_to_add = match pair_id {
             SIGNATURE_SCHEME_V2_BLOCK_ID => Self::SignatureSchemeV2Block(SignatureSchemeV2::parse(
                 pair_size,
@@ -168,15 +171,6 @@ impl ValueSigningBlock {
             #[cfg(feature = "elf")]
             ELF_SECTION_INFO_BLOCK_ID => {
                 Self::ElfSectionInfoBlock(ElfSectionInfo::parse(pair_size, pair_id, block_value)?)
-            }
-            VERITY_PADDING_BLOCK_ID => {
-                add_space!(4);
-                print_string!("Padding Block of {} bytes", block_value.len());
-                Self::BaseSigningBlock(RawData {
-                    size: pair_size,
-                    id: pair_id,
-                    data: block_value.to_vec(),
-                })
             }
             _ => Self::BaseSigningBlock(RawData {
                 size: pair_size,
@@ -371,6 +365,22 @@ impl SigningBlock {
 
                 let block_size = u64::from_le_bytes(create_fixed_buffer_8(size_slice)) as usize;
 
+                // Security check: prevent DoS via extremely large block size
+                if block_size > MAX_SIGNING_BLOCK_SIZE {
+                    return Err(std::io::Error::other(format!(
+                        "Signing block size {} exceeds maximum allowed size {} (potential DoS attack)",
+                        block_size, MAX_SIGNING_BLOCK_SIZE
+                    )));
+                }
+
+                // Also check that block_size doesn't exceed file length
+                if block_size > file_len {
+                    return Err(std::io::Error::other(format!(
+                        "Signing block size {} exceeds file length {} (corrupted or malicious file)",
+                        block_size, file_len
+                    )));
+                }
+
                 // Calculate start position of the full block
                 let block_end_in_window = pos + MAGIC_LEN;
                 let block_start_in_window = match block_end_in_window.checked_sub(block_size + SIZE_UINT64) {
@@ -394,7 +404,6 @@ impl SigningBlock {
                         reader.seek(SeekFrom::Start(block_start_in_file as u64))?;
                         reader.read_exact(&mut vec_full_block)?;
 
-                        print_string!("--- Start of Signature Block ---");
                         let mut sig = match Self::parse_full_block(&vec_full_block) {
                             Ok(v) => v,
                             Err(e) => {
@@ -406,7 +415,6 @@ impl SigningBlock {
                         };
                         sig.file_offset_start = block_start_in_file;
                         sig.file_offset_end = file_offset_end;
-                        print_string!("--- End of Signature Block ---");
                         return Ok(sig);
                     }
                 };
@@ -424,7 +432,6 @@ impl SigningBlock {
                 let file_offset_start = window_start + block_start_in_window;
                 let file_offset_end = window_start + block_end_in_window;
 
-                print_string!("--- Start of Signature Block ---");
                 let mut sig = match Self::parse_full_block(&vec_full_block) {
                     Ok(v) => v,
                     Err(e) => {
@@ -436,7 +443,6 @@ impl SigningBlock {
                 };
                 sig.file_offset_start = file_offset_start;
                 sig.file_offset_end = file_offset_end;
-                print_string!("--- End of Signature Block ---");
                 return Ok(sig);
             }
         }
@@ -568,6 +574,15 @@ impl SigningBlock {
                     }
                 };
                 let size = u64::from_le_bytes(create_fixed_buffer_8(size_part)) as usize;
+
+                // Security check: prevent DoS via extremely large block size
+                if size > MAX_SIGNING_BLOCK_SIZE {
+                    return Err(format!(
+                        "Signing block size {} exceeds maximum allowed size {} (potential DoS attack)",
+                        size, MAX_SIGNING_BLOCK_SIZE
+                    ));
+                }
+
                 let start_full_block = match start_magic.checked_sub(size - MAGIC_LEN + SIZE_UINT64)
                 {
                     Some(v) => v,
@@ -638,5 +653,51 @@ impl SigningBlock {
     pub const fn offset_by(&mut self, offset: usize) {
         self.file_offset_start += offset;
         self.file_offset_end += offset;
+    }
+}
+
+impl std::fmt::Display for SigningBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "KSU Signing Block")?;
+        writeln!(f, "  File offset: {} - {}", self.file_offset_start, self.file_offset_end)?;
+        writeln!(f, "  Block size: {} bytes", self.size_of_block_start)?;
+        writeln!(f, "  Content size: {} bytes", self.content_size)?;
+        writeln!(f, "  Blocks: {}", self.content.len())?;
+
+        for (i, block) in self.content.iter().enumerate() {
+            writeln!(f, "  Block {}: {}", i + 1, block)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for ValueSigningBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SignatureSchemeV2Block(scheme) => {
+                write!(f, "V2 Signature (id=0x{:08x}, {} signers)",
+                    scheme.id,
+                    scheme.signers.signers_data.len()
+                )
+            }
+            Self::SourceStampBlock(stamp) => {
+                write!(f, "Source Stamp (id=0x{:08x})", stamp.id)
+            }
+            #[cfg(feature = "elf")]
+            Self::ElfSectionInfoBlock(info) => {
+                write!(f, "ELF Section Info (id=0x{:08x}, {} sections)",
+                    info.id,
+                    info.sections.len()
+                )
+            }
+            Self::BaseSigningBlock(raw) => {
+                let block_name = match raw.id {
+                    VERITY_PADDING_BLOCK_ID => "Verity Padding",
+                    _ => "Unknown",
+                };
+                write!(f, "{} (id=0x{:08x}, {} bytes)", block_name, raw.id, raw.data.len())
+            }
+        }
     }
 }

@@ -6,12 +6,10 @@ use std::mem;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::add_space;
 use crate::common::{
     AdditionalAttribute, AdditionalAttributes, Certificate, Certificates, Digest, Digests, PubKey,
     Signature, Signatures,
 };
-use crate::utils::print_string;
 use crate::MyReader;
 
 #[cfg(feature = "signing")]
@@ -55,8 +53,6 @@ impl SourceStamp {
     /// # Errors
     /// Returns a string if the parsing fails.
     pub fn parse(size: usize, id: u32, data: &mut MyReader) -> Result<Self, String> {
-        add_space!(4);
-        print_string!("Source Stamp Block:");
         let stamp_block = StampBlock::parse(data)?;
         Ok(Self {
             size,
@@ -116,9 +112,6 @@ impl StampBlock {
     /// Returns a string if the parsing fails.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size_stamp_block = data.read_size()?;
-        add_space!(4);
-        print_string!("size_stamp_block: {}", size_stamp_block);
-
         let data = &mut data.as_slice(size_stamp_block)?;
 
         let signed_data = SignedData::parse(data)?;
@@ -178,9 +171,6 @@ impl SignedData {
     /// Returns a string if the parsing fails.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size_signed_data = data.read_size()?;
-        add_space!(4);
-        print_string!("size_signed_data: {}", size_signed_data);
-
         let data = &mut data.as_slice(size_signed_data)?;
 
         let digests = Digests::parse(data)?;

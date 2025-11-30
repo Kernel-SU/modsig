@@ -412,26 +412,37 @@ impl CertChainVerifier {
     }
 
     /// Verify a certificate chain (fallback without verify feature)
+    ///
+    /// **Warning**: Without the `verify` feature, this method cannot perform real
+    /// certificate chain validation. It can only check if a certificate is directly
+    /// in the trusted roots list. `cert_chain_valid` will be `false` unless the
+    /// certificate is directly trusted.
+    ///
+    /// Enable the `verify` feature for proper chain validation.
     #[cfg(not(feature = "verify"))]
     pub fn verify_chain(&self, end_entity: &[u8], intermediates: &[Vec<u8>]) -> (bool, bool, Option<String>) {
-        // Without verify feature, we can only do basic checks
+        let _ = intermediates; // Unused without verify feature
+
+        // Without verify feature, we cannot validate certificate chains
         if self.trusted_roots.is_empty() {
-            return (true, false, Some("No trusted roots configured".to_string()));
+            return (
+                false,
+                false,
+                Some("No trusted roots configured; chain validation requires 'verify' feature".to_string()),
+            );
         }
 
-        // Check if end entity is directly trusted
+        // Check if end entity is directly trusted (the only check we can do)
         if self.trusted_roots.is_direct_root(end_entity) {
             return (true, true, None);
         }
 
-        // Check if any intermediate is trusted
-        for intermediate in intermediates {
-            if self.trusted_roots.is_direct_root(intermediate) {
-                return (true, true, None);
-            }
-        }
-
-        (true, false, Some("Certificate not in trusted roots".to_string()))
+        // Without verify feature, we cannot validate chains - mark as invalid
+        (
+            false,
+            false,
+            Some("Chain validation unavailable: enable 'verify' feature for proper chain verification".to_string()),
+        )
     }
 
     /// Validate the structure of a certificate chain (issuer/subject matching)

@@ -6,13 +6,11 @@ use std::mem;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::add_space;
 use crate::common::AdditionalAttributes;
 use crate::common::Certificates;
 use crate::common::Digests;
 use crate::common::PubKey;
 use crate::common::Signatures;
-use crate::utils::print_string;
 use crate::MyReader;
 
 /// Signature Scheme V2
@@ -62,8 +60,6 @@ impl Signers {
             size: size_signers,
             signers_data: Vec::new(),
         };
-        add_space!(4);
-        print_string!("size_signers: {}", size_signers);
         let data = &mut data.as_slice(size_signers)?;
         while data.get_pos() < data.len() {
             let signer = Signer::parse(data)?;
@@ -126,8 +122,6 @@ impl Signer {
     /// Returns a string if the parsing fails.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size_one_signer = data.read_size()?;
-        add_space!(8);
-        print_string!("size_one_signer: {}", size_one_signer);
         let signed_data = SignedData::parse(data)?;
         let signatures = Signatures::parse(data)?;
         let pub_key = PubKey::parse(data)?;
@@ -214,8 +208,6 @@ impl SignedData {
     /// Returns a string if the parsing fails.
     pub fn parse(data: &mut MyReader) -> Result<Self, String> {
         let size_signed_data = data.read_size()?;
-        add_space!(8);
-        print_string!("size_signed_data: {}", size_signed_data);
         let data = &mut data.as_slice(size_signed_data)?;
         let digests = Digests::parse(data)?;
         let certificates = Certificates::parse(data)?;
