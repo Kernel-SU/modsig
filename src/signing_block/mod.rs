@@ -265,8 +265,8 @@ impl SigningBlock {
                 return Err(std::io::Error::other("Error: Padding block already exists"));
             }
         }
-        let content_size = content.iter().fold(0, |acc, x| acc + x.size());
-        let almost_full_size = SIZE_UINT64 + content_size + SIZE_UINT64 + MAGIC_LEN;
+        let initial_content_size = content.iter().fold(0, |acc, x| acc + x.size());
+        let almost_full_size = SIZE_UINT64 + initial_content_size + SIZE_UINT64 + MAGIC_LEN;
         // padding content to match 4096 bytes multiple
         let padding_block = match almost_full_size % 4096 {
             0 => Vec::new(),
@@ -291,8 +291,9 @@ impl SigningBlock {
             }
         };
         let new_content = [content, padding_block].concat();
-        let size = new_content.iter().fold(0, |acc, x| acc + x.size());
-        let size = size + SIZE_UINT64 + MAGIC_LEN;
+        // Recalculate content_size after adding padding block
+        let content_size = new_content.iter().fold(0, |acc, x| acc + x.size());
+        let size = content_size + SIZE_UINT64 + MAGIC_LEN;
         let total_size = SIZE_UINT64 + size;
         debug_assert!(total_size.is_multiple_of(4096));
         Ok(Self {
@@ -314,57 +315,86 @@ impl SigningBlock {
         file_len: usize,
         end_offset: usize,
     ) -> Result<Self, std::io::Error> {
-        let start_loop = end_offset + MAGIC_LEN;
-        for idx in start_loop..file_len {
-            reader.seek(SeekFrom::End(-(idx as i64)))?;
-            let mut magic_buf = [0; MAGIC_LEN];
-            match reader.read_exact(&mut magic_buf) {
-                Ok(_) => {
-                    if &magic_buf == MAGIC {
-                        let pos_end_block_size = idx + SIZE_UINT64;
-                        reader.seek(SeekFrom::End(-(pos_end_block_size as i64)))?;
-                        let mut buf = [0; SIZE_UINT64];
-                        reader.read_exact(&mut buf)?;
-                        let block_size = u64::from_le_bytes(buf) as usize;
-                        let file_offset_start = match (file_len - idx + MAGIC_LEN)
-                            .checked_sub(block_size + SIZE_UINT64)
-                        {
-                            Some(v) => v,
-                            None => {
-                                return Err(std::io::Error::other(
-                                    format!(
-                                        "Error: starting at {} is less than {} (block size + size of u64)",
-                                        file_len - idx + MAGIC_LEN, block_size + SIZE_UINT64
-                                    ),
-                                ));
-                            }
-                        };
-                        let mut vec_full_block = vec![0; block_size + SIZE_UINT64];
-                        reader.seek(SeekFrom::Start(file_offset_start as u64))?;
-                        reader.read_exact(&mut vec_full_block)?;
-                        let file_offset_end = file_offset_start + SIZE_UINT64 + block_size;
-                        print_string!("--- Start of Signature Block ---");
-                        let mut sig = match Self::parse_full_block(&vec_full_block) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return Err(std::io::Error::other(format!(
-                                    "Error parsing full block: {}",
-                                    e
-                                )));
-                            }
-                        };
-                        sig.file_offset_start = file_offset_start;
-                        sig.file_offset_end = file_offset_end;
-                        print_string!("--- End of Signature Block ---");
-                        return Ok(sig);
+        // Read a window from the end of file into memory for efficient searching
+        // Max signing block size is typically limited; use a reasonable window size
+        const MAX_WINDOW_SIZE: usize = 16 * 1024 * 1024; // 16 MB max window
+        let search_len = file_len.saturating_sub(end_offset);
+        let window_size = search_len.min(MAX_WINDOW_SIZE);
+
+        if window_size < MAGIC_LEN + SIZE_UINT64 {
+            return Err(std::io::Error::other(
+                "File too small to contain signing block",
+            ));
+        }
+
+        // Read the tail window into memory
+        let window_start = file_len - window_size;
+        reader.seek(SeekFrom::Start(window_start as u64))?;
+        let mut window = vec![0u8; window_size];
+        reader.read_exact(&mut window)?;
+
+        // Search backwards in memory for the magic number
+        // Start searching from (window_size - end_offset - MAGIC_LEN) position
+        let search_start = window_size.saturating_sub(end_offset + MAGIC_LEN);
+        for pos in (0..=search_start).rev() {
+            let magic_slice = match window.get(pos..pos + MAGIC_LEN) {
+                Some(s) => s,
+                None => continue,
+            };
+
+            if magic_slice == MAGIC {
+                // Found magic, read block size from before the magic
+                let size_pos = match pos.checked_sub(SIZE_UINT64) {
+                    Some(p) => p,
+                    None => continue, // Not enough space for size field
+                };
+
+                let size_slice = match window.get(size_pos..size_pos + SIZE_UINT64) {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                let block_size = u64::from_le_bytes(create_fixed_buffer_8(size_slice)) as usize;
+
+                // Calculate start position of the full block
+                let block_end_in_window = pos + MAGIC_LEN;
+                let block_start_in_window = match block_end_in_window.checked_sub(block_size + SIZE_UINT64) {
+                    Some(v) => v,
+                    None => {
+                        return Err(std::io::Error::other(format!(
+                            "Error: block size {} is larger than available data",
+                            block_size
+                        )));
                     }
-                }
-                Err(_) => {
-                    return Err(std::io::Error::other(format!(
-                        "Error reading file, {}",
-                        file_len - idx
-                    )));
-                }
+                };
+
+                // Extract the full block from the window
+                let vec_full_block = match window.get(block_start_in_window..block_end_in_window) {
+                    Some(s) => s.to_vec(),
+                    None => {
+                        return Err(std::io::Error::other(
+                            "Error: cannot extract full block from window",
+                        ));
+                    }
+                };
+
+                let file_offset_start = window_start + block_start_in_window;
+                let file_offset_end = window_start + block_end_in_window;
+
+                print_string!("--- Start of Signature Block ---");
+                let mut sig = match Self::parse_full_block(&vec_full_block) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Err(std::io::Error::other(format!(
+                            "Error parsing full block: {}",
+                            e
+                        )));
+                    }
+                };
+                sig.file_offset_start = file_offset_start;
+                sig.file_offset_end = file_offset_end;
+                print_string!("--- End of Signature Block ---");
+                return Ok(sig);
             }
         }
 

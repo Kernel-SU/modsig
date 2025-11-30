@@ -118,7 +118,8 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Verify Source Stamp (if present)
-    let stamp_result = verifier.verify_source_stamp(&signing_block).ok();
+    // Note: We preserve the error to distinguish between "not found" and "verification failed"
+    let stamp_result = verifier.verify_source_stamp(&signing_block);
 
     // Display V2 signature verification result
     match &v2_result {
@@ -208,7 +209,7 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
 
     // Display Source Stamp verification result
     match &stamp_result {
-        Some(result) => {
+        Ok(result) => {
             if result.signature_valid {
                 println!("✓ Source Stamp verification passed");
                 println!("  Signature valid: {}", result.signature_valid);
@@ -222,21 +223,53 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             } else {
-                eprintln!("⚠ Source Stamp verification failed");
-                // Source Stamp failure is not a critical error
+                eprintln!("⚠ Source Stamp signature invalid");
+                if !result.warnings.is_empty() {
+                    for warning in &result.warnings {
+                        eprintln!("  ⚠ {}", warning);
+                    }
+                }
+                // Source Stamp failure is a warning, but we should report it
             }
         }
-        None => {
+        Err(VerifyError::NoSignature) => {
             println!("ℹ Source Stamp not found");
         }
+        Err(VerifyError::MultiSignerFailure(errors)) => {
+            eprintln!("✗ Source Stamp verification failed:");
+            for err in errors {
+                eprintln!("  ✗ {}", err);
+            }
+            // Source Stamp verification failure is significant - warn strongly
+            eprintln!("⚠ WARNING: Source Stamp present but verification failed!");
+        }
+        Err(e) => {
+            eprintln!("✗ Source Stamp verification error: {}", e);
+            // Source Stamp verification failure is significant - warn strongly
+            eprintln!("⚠ WARNING: Source Stamp present but verification failed!");
+        }
     }
+
+    // Check if Source Stamp verification failed (not just missing)
+    let stamp_failed = matches!(
+        &stamp_result,
+        Err(e) if !matches!(e, VerifyError::NoSignature)
+    );
 
     // Overall result
     if v2_result.is_some() && v2_result.as_ref().is_some_and(|r| r.signature_valid && r.digest_valid) {
         println!();
-        println!("✓ Module signature verification successful!");
-        println!("  All checks passed: signature, digest, chain, trust");
-        Ok(())
+        if stamp_failed {
+            println!("⚠ Module V2 signature verified, but Source Stamp verification FAILED!");
+            println!("  V2 checks passed: signature, digest, chain, trust");
+            println!("  Source Stamp: VERIFICATION FAILED - may indicate tampering");
+            // Return error because Source Stamp failure is a security concern
+            Err("Source Stamp verification failed".into())
+        } else {
+            println!("✓ Module signature verification successful!");
+            println!("  All checks passed: signature, digest, chain, trust");
+            Ok(())
+        }
     } else {
         Err("Module signature verification failed".into())
     }

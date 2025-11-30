@@ -122,7 +122,7 @@ pub fn execute(args: DigestArgs) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Dump raw signable regions to a file
+/// Dump raw signable regions to a file using streaming copy
 fn dump_regions(
     input_path: &PathBuf,
     regions: &[ksusig::DigestRegion],
@@ -131,13 +131,25 @@ fn dump_regions(
     let mut input = File::open(input_path)?;
     let mut output = File::create(output_path)?;
 
+    // Use a fixed-size buffer for streaming copy to avoid OOM on large files
+    const BUFFER_SIZE: usize = 64 * 1024; // 64 KB buffer
+    let mut buffer = vec![0u8; BUFFER_SIZE];
     let mut total_written: u64 = 0;
 
     for region in regions {
         input.seek(SeekFrom::Start(region.offset))?;
-        let mut buffer = vec![0u8; region.size as usize];
-        input.read_exact(&mut buffer)?;
-        output.write_all(&buffer)?;
+        let mut remaining = region.size;
+
+        while remaining > 0 {
+            let to_read = (remaining as usize).min(BUFFER_SIZE);
+            let buf_slice = match buffer.get_mut(..to_read) {
+                Some(s) => s,
+                None => return Err("Buffer slice error".into()),
+            };
+            input.read_exact(buf_slice)?;
+            output.write_all(buf_slice)?;
+            remaining -= to_read as u64;
+        }
         total_written += region.size;
     }
 

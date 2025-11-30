@@ -571,28 +571,29 @@ impl SignatureVerifier {
 
                     // Verify each signature
                     let mut sig_valid = true;
-                    for (idx, sig) in signer.signatures.signatures_data.iter().enumerate() {
-                        let digest = match signer.signed_data.digests.digests_data.get(idx) {
+                    for sig in signer.signatures.signatures_data.iter() {
+                        let algo = &sig.signature_algorithm_id;
+
+                        // Find the digest by algorithm ID instead of by index
+                        // This ensures correct matching when digest/signature order differs
+                        let digest = signer
+                            .signed_data
+                            .digests
+                            .digests_data
+                            .iter()
+                            .find(|d| d.signature_algorithm_id == *algo);
+
+                        let digest = match digest {
                             Some(d) => d,
                             None => {
                                 signer_result.warnings.push(format!(
-                                    "Digest count mismatch: expected {} digests",
-                                    signer.signatures.signatures_data.len()
+                                    "No digest found for algorithm {}",
+                                    algo
                                 ));
                                 sig_valid = false;
                                 break;
                             }
                         };
-
-                        let algo = &sig.signature_algorithm_id;
-
-                        // Check algorithm consistency
-                        if algo != &digest.signature_algorithm_id {
-                            signer_result.warnings.push(format!(
-                                "Algorithm mismatch: digest uses {}, signature uses {}",
-                                digest.signature_algorithm_id, algo
-                            ));
-                        }
 
                         // Verify signature
                         if let Err(e) = algo.verify(pubkey, raw_data, &sig.signature) {
