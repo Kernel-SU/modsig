@@ -87,9 +87,8 @@ pub use signer::{
 // Verify exports
 #[cfg(feature = "verify")]
 pub use verifier::{
-    verify_signing_block, verify_with_digest, verify_with_roots, verify_with_roots_and_digest,
-    CertChainVerifier, DigestContext, SignatureVerifier, SignerVerifyResult, TrustedRoots,
-    VerifyError, VerifyResult,
+    verify_with_digest, verify_with_roots_and_digest, CertChainVerifier, DigestContext,
+    SignatureVerifier, SignerVerifyResult, TrustedRoots, VerifyAllResult, VerifyError, VerifyResult,
 };
 
 // shortcuts

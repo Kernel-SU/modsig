@@ -82,50 +82,115 @@ impl Module {
         }
     }
 
-    /// Verify the Module file.
-    /// # Errors
-    /// Returns a string if the verification fails.
+    /// Fully verify the Module file including content integrity and certificate chain.
+    ///
+    /// This method performs complete verification of both V2 signature and Source Stamp:
+    /// 1. Verifies the V2 cryptographic signature
+    /// 2. Computes the module content digest and verifies it matches the stored digest
+    /// 3. Validates the certificate chain (if `verify` feature is enabled)
+    /// 4. Checks if the certificate is trusted (if trusted roots are provided)
+    /// 5. Verifies the Source Stamp signature (if present)
+    ///
+    /// # Returns
+    /// Returns `VerifyAllResult` containing verification results for both V2 and Source Stamp.
+    /// Use `result.is_valid()` to check if all present signatures passed verification.
     #[cfg(feature = "signing")]
-    pub fn verify(&self) -> Result<(), String> {
-        let signing_block = self.get_signing_block().map_err(|e| e.to_string())?;
-        for block in signing_block.content {
-            if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
-                let len_signer = v2.signers.signers_data.len();
-                if len_signer == 0 {
-                    return Err("No signer found".to_string());
-                }
-                for idx in 0..len_signer {
-                    let signer = match v2.signers.signers_data.get(idx) {
-                        Some(signer) => signer,
-                        None => return Err("No signer found".to_string()),
-                    };
-                    let pubkey = &signer.pub_key.data;
-                    let signer_data = &signer.signed_data.to_u8();
-                    let raw_data = match signer_data.get(4..) {
-                        Some(data) => data,
-                        None => return Err("Invalid signed data".to_string()),
-                    };
-                    if signer.signatures.signatures_data.is_empty() {
-                        return Err("No signature found".to_string());
-                    }
-                    for (idx_sig, signature) in signer.signatures.signatures_data.iter().enumerate()
-                    {
-                        let signature = &signature.signature;
-                        let digest = match signer.signed_data.digests.digests_data.get(idx_sig) {
-                            Some(digest) => digest,
-                            None => return Err("No digest found".to_string()),
-                        };
-                        let algo = &digest.signature_algorithm_id;
+    #[cfg(feature = "hash")]
+    pub fn verify_full(&self) -> crate::verifier::VerifyAllResult {
+        use crate::verifier::{DigestContext, SignatureVerifier, VerifyAllResult, VerifyError};
 
-                        match algo.verify(pubkey, raw_data, signature) {
-                            Ok(_) => {}
-                            Err(e) => return Err(e),
+        let signing_block = match self.get_signing_block() {
+            Ok(block) => block,
+            Err(e) => {
+                return VerifyAllResult {
+                    v2: Err(VerifyError::InvalidSignature(format!(
+                        "Failed to get signing block: {}",
+                        e
+                    ))),
+                    source_stamp: Err(VerifyError::NoSignature),
+                };
+            }
+        };
+
+        // Build digest context from computed digests
+        let mut digest_context = DigestContext::new();
+
+        // Find all algorithms used in the signing block and compute digests
+        for block in &signing_block.content {
+            if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
+                for signer in &v2.signers.signers_data {
+                    for digest_entry in &signer.signed_data.digests.digests_data {
+                        let algo = &digest_entry.signature_algorithm_id;
+                        let algo_id = algo.to_u32();
+
+                        // Only compute if not already present
+                        if digest_context.get_digest(algo_id).is_none() {
+                            if let Ok(computed) = self.digest(algo) {
+                                digest_context.add_digest(algo_id, computed);
+                            }
                         }
                     }
                 }
             }
         }
-        Ok(())
+
+        let verifier = SignatureVerifier::with_builtin_roots();
+        verifier.verify_all_with_digest(&signing_block, Some(&digest_context))
+    }
+
+    /// Fully verify the Module file with custom trusted roots.
+    ///
+    /// This method performs complete verification of both V2 signature and Source Stamp
+    /// with custom trusted root certificates.
+    ///
+    /// # Returns
+    /// Returns `VerifyAllResult` containing verification results for both V2 and Source Stamp.
+    /// Use `result.is_valid()` to check if all present signatures passed verification.
+    #[cfg(feature = "signing")]
+    #[cfg(feature = "hash")]
+    pub fn verify_with_roots(
+        &self,
+        roots: crate::verifier::TrustedRoots,
+    ) -> crate::verifier::VerifyAllResult {
+        use crate::verifier::{DigestContext, SignatureVerifier, VerifyAllResult, VerifyError};
+
+        let signing_block = match self.get_signing_block() {
+            Ok(block) => block,
+            Err(e) => {
+                return VerifyAllResult {
+                    v2: Err(VerifyError::InvalidSignature(format!(
+                        "Failed to get signing block: {}",
+                        e
+                    ))),
+                    source_stamp: Err(VerifyError::NoSignature),
+                };
+            }
+        };
+
+        // Build digest context from computed digests
+        let mut digest_context = DigestContext::new();
+
+        // Find all algorithms used in the signing block and compute digests
+        for block in &signing_block.content {
+            if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
+                for signer in &v2.signers.signers_data {
+                    for digest_entry in &signer.signed_data.digests.digests_data {
+                        let algo = &digest_entry.signature_algorithm_id;
+                        let algo_id = algo.to_u32();
+
+                        // Only compute if not already present
+                        if digest_context.get_digest(algo_id).is_none() {
+                            if let Ok(computed) = self.digest(algo) {
+                                digest_context.add_digest(algo_id, computed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let verifier = SignatureVerifier::with_trusted_roots(roots);
+        verifier.verify_all_with_digest(&signing_block, Some(&digest_context))
     }
 
     /// find_eocd finds the End of Central Directory Record of the Module file.
@@ -139,7 +204,9 @@ impl Module {
 
     /// Get the offsets of the Module file.
     /// # Errors
-    /// Returns a string if the offsets are not found.
+    /// Returns an error if the offsets cannot be determined or if the signing block is corrupted.
+    /// Note: A module without a signing block is handled normally (returns offsets without signature).
+    /// However, a corrupted signing block will return an error.
     pub fn get_offsets(&self) -> Result<FileOffsets, std::io::Error> {
         let eocd = self.find_eocd()?;
         match self.get_signing_block() {
@@ -161,13 +228,26 @@ impl Module {
                     file_len,
                 ))
             }
-            Err(_) => {
-                let stop_content = eocd.cd_offset as usize;
-                Ok(FileOffsets::without_signature(
-                    stop_content,
-                    eocd.file_offset,
-                    self.file_len,
-                ))
+            Err(e) => {
+                // Distinguish between "no signature" and "corrupted signature"
+                // "Magic not found" means no signing block exists - this is normal for unsigned modules
+                // Other errors (InvalidData, IO errors) indicate corruption - propagate these
+                let err_msg = e.to_string();
+                if err_msg.contains("Magic not found") || err_msg.contains("Module is raw") {
+                    // No signing block - normal case for unsigned modules
+                    let stop_content = eocd.cd_offset as usize;
+                    Ok(FileOffsets::without_signature(
+                        stop_content,
+                        eocd.file_offset,
+                        self.file_len,
+                    ))
+                } else {
+                    // Signing block exists but is corrupted or unreadable
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Signing block corrupted or unreadable: {}", e),
+                    ))
+                }
             }
         }
     }
@@ -208,7 +288,12 @@ impl Module {
             }
         };
         let mut eocd = self.find_eocd()?;
-        eocd.cd_offset -= size_sig as u32;
+        eocd.cd_offset = eocd.cd_offset.checked_sub(size_sig as u32).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid signing block: signature size exceeds central directory offset",
+            )
+        })?;
 
         let eocd_serialized = eocd.to_u8();
 
@@ -236,7 +321,15 @@ impl Module {
         let sig = self.get_signing_block()?;
         let offsets = self.get_offsets()?;
         let mut eocd = self.find_eocd()?;
-        eocd.cd_offset += sig.get_full_size() as u32;
+        eocd.cd_offset = eocd
+            .cd_offset
+            .checked_add(sig.get_full_size() as u32)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid signing block: offset overflow when adding signature",
+                )
+            })?;
         let oecd_serialized = eocd.to_u8();
         let eocd_len = oecd_serialized.len();
 

@@ -60,13 +60,17 @@ pub fn execute(args: InfoArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Additional certificate details
+            // Note: We use verify_v2_with_digest(None) here because this is an info command
+            // that only displays certificate information. For actual security verification,
+            // use Module::verify_full() which computes and verifies content digests.
             let verifier = SignatureVerifier::with_builtin_roots();
 
-            match verifier.verify_v2(&sig_block) {
+            match verifier.verify_v2_with_digest(&sig_block, None) {
                 Ok(result) => {
                     println!();
                     println!("V2 Certificate details:");
                     println!("  Signature valid: {}", result.signature_valid);
+                    println!("  Content integrity verified: {}", result.digest_valid);
                     println!("  Certificate chain valid: {}", result.cert_chain_valid);
                     println!("  Trusted: {}", result.is_trusted);
                     if let Some(cert) = result.certificate {

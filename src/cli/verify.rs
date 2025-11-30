@@ -18,10 +18,6 @@ pub struct VerifyArgs {
     #[arg(long = "root")]
     pub root_cert: Option<PathBuf>,
 
-    /// Skip digest verification (only verify signature structure)
-    #[arg(long = "skip-digest")]
-    pub skip_digest: bool,
-
     /// Verbose output
     #[arg(long, short)]
     pub verbose: bool,
@@ -61,55 +57,48 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
         SignatureVerifier::with_builtin_roots()
     };
 
-    // Compute digest for verification (unless skipped)
-    let digest_context = if args.skip_digest {
-        println!("ℹ Digest verification skipped (--skip-digest)");
-        None
-    } else {
-        // Compute digests for both supported algorithms
-        let mut ctx = DigestContext::new();
+    // Compute digest for verification
+    let mut digest_context = DigestContext::new();
 
-        // Try SHA2-256 (ECDSA P-256)
-        match module.digest(&Algorithms::ECDSA_SHA2_256) {
-            Ok(digest) => {
-                ctx.add_digest(Algorithms::ECDSA_SHA2_256.to_u32(), digest);
-                if args.verbose {
-                    println!("✓ Computed SHA2-256 digest");
-                }
-            }
-            Err(e) => {
-                if args.verbose {
-                    println!("⚠ Could not compute SHA2-256 digest: {}", e);
-                }
+    // Try SHA2-256 (ECDSA P-256)
+    match module.digest(&Algorithms::ECDSA_SHA2_256) {
+        Ok(digest) => {
+            digest_context.add_digest(Algorithms::ECDSA_SHA2_256.to_u32(), digest);
+            if args.verbose {
+                println!("✓ Computed SHA2-256 digest");
             }
         }
-
-        // Try SHA2-512 (ECDSA P-384)
-        match module.digest(&Algorithms::ECDSA_SHA2_512) {
-            Ok(digest) => {
-                ctx.add_digest(Algorithms::ECDSA_SHA2_512.to_u32(), digest);
-                if args.verbose {
-                    println!("✓ Computed SHA2-512 digest");
-                }
-            }
-            Err(e) => {
-                if args.verbose {
-                    println!("⚠ Could not compute SHA2-512 digest: {}", e);
-                }
+        Err(e) => {
+            if args.verbose {
+                println!("⚠ Could not compute SHA2-256 digest: {}", e);
             }
         }
+    }
 
-        if ctx.digests.is_empty() {
-            eprintln!("✗ Could not compute any digests for verification");
-            return Err("Digest computation failed".into());
+    // Try SHA2-512 (ECDSA P-384)
+    match module.digest(&Algorithms::ECDSA_SHA2_512) {
+        Ok(digest) => {
+            digest_context.add_digest(Algorithms::ECDSA_SHA2_512.to_u32(), digest);
+            if args.verbose {
+                println!("✓ Computed SHA2-512 digest");
+            }
         }
+        Err(e) => {
+            if args.verbose {
+                println!("⚠ Could not compute SHA2-512 digest: {}", e);
+            }
+        }
+    }
 
-        println!("✓ File digests computed");
-        Some(ctx)
-    };
+    if digest_context.digests.is_empty() {
+        eprintln!("✗ Could not compute any digests for verification");
+        return Err("Digest computation failed".into());
+    }
+
+    println!("✓ File digests computed");
 
     // Verify V2 signature with digest
-    let v2_result = match verifier.verify_v2_with_digest(&signing_block, digest_context.as_ref()) {
+    let v2_result = match verifier.verify_v2_with_digest(&signing_block, Some(&digest_context)) {
         Ok(r) => Some(r),
         Err(VerifyError::NoSignature) => {
             println!("ℹ V2 signature not found");

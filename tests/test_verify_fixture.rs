@@ -16,9 +16,13 @@ fn verify_fixture_signed_zip_has_trusted_chain() {
         .expect("extract signing block from fixture");
 
     let verifier = SignatureVerifier::with_builtin_roots();
-    let result = verifier.verify_v2(&signing_block).expect("verify v2");
+    // Note: Using None for digest context - digest_valid will be false
+    // For full verification including content integrity, use Module::verify_full()
+    let result = verifier.verify_v2_with_digest(&signing_block, None).expect("verify v2");
 
     assert!(result.signature_valid, "signature should be valid");
+    // digest_valid is false when no digest context is provided (security improvement)
+    assert!(!result.digest_valid, "digest_valid should be false without digest context");
     assert!(
         result.cert_chain_valid,
         "certificate chain should be structurally valid"
@@ -36,15 +40,15 @@ fn verify_fixture_signed_zip_has_trusted_chain() {
         1,
         "fixture should carry one intermediate certificate"
     );
-    // Note: warnings may include "Digest verification skipped" when no digest context is provided
+    // Note: warnings include "Content integrity NOT verified" when no digest context is provided
     // This is expected behavior in the new API
-    let non_skip_warnings: Vec<_> = result.warnings.iter()
-        .filter(|w| !w.contains("Digest verification skipped"))
+    let non_integrity_warnings: Vec<_> = result.warnings.iter()
+        .filter(|w| !w.contains("Content integrity NOT verified"))
         .collect();
     assert!(
-        non_skip_warnings.is_empty(),
+        non_integrity_warnings.is_empty(),
         "no unexpected warnings for the official fixture, got: {:?}",
-        non_skip_warnings
+        non_integrity_warnings
     );
 }
 
@@ -57,7 +61,7 @@ fn verify_untrusted_fixture_can_be_trusted_with_custom_root() {
     // 默认根：应验签成功，但不可信。
     let default_verifier = SignatureVerifier::with_builtin_roots();
     let default_result = default_verifier
-        .verify_v2(&signing_block)
+        .verify_v2_with_digest(&signing_block, None)
         .expect("verify v2");
     assert!(default_result.signature_valid, "signature should be valid");
     assert!(
@@ -100,7 +104,7 @@ fn verify_dual_signed_has_v2_and_stamp_results() {
         .expect("extract signing block from fixture");
 
     let verifier = SignatureVerifier::with_builtin_roots();
-    let result = verifier.verify_all(&signing_block);
+    let result = verifier.verify_all_with_digest(&signing_block, None);
 
     // Test new VerifyAllResult API
     assert!(result.has_v2(), "should have V2 signature");
@@ -108,6 +112,8 @@ fn verify_dual_signed_has_v2_and_stamp_results() {
 
     let v2 = result.v2.expect("v2 result");
     assert!(v2.signature_valid, "v2 signature should be valid");
+    // digest_valid is false when no digest context is provided
+    assert!(!v2.digest_valid, "v2 digest_valid should be false without digest context");
     assert!(v2.cert_chain_valid, "v2 chain should be valid");
     assert!(
         !v2.is_trusted,
@@ -134,10 +140,10 @@ fn verify_unsigned_module_returns_no_signature() {
         "unsigned module should not have a signing block"
     );
 
-    // 若未来返回签名块，也应在 verify_v2 里报 NoSignature。
+    // 若未来返回签名块，也应在 verify_v2_with_digest 里报 NoSignature。
     if let Ok(block) = signing_block {
         let verifier = SignatureVerifier::with_builtin_roots();
-        let err = verifier.verify_v2(&block).unwrap_err();
+        let err = verifier.verify_v2_with_digest(&block, None).unwrap_err();
         assert!(
             matches!(err, VerifyError::NoSignature),
             "should return NoSignature"
@@ -271,7 +277,7 @@ fn verify_reports_all_signers() {
         .expect("load signing block");
 
     let verifier = SignatureVerifier::with_builtin_roots();
-    let result = verifier.verify_v2(&signing_block).expect("verify v2");
+    let result = verifier.verify_v2_with_digest(&signing_block, None).expect("verify v2");
 
     // 检查签名者结果列表
     assert!(
@@ -282,6 +288,8 @@ fn verify_reports_all_signers() {
     // 检查第一个签名者的详细信息
     let first_signer = &result.signers[0];
     assert!(first_signer.signature_valid, "first signer should have valid signature");
+    // digest_valid is false when no digest context is provided
+    assert!(!first_signer.digest_valid, "first signer digest_valid should be false without digest context");
     assert!(first_signer.certificate.is_some(), "first signer should have certificate");
 
     // 整体结果应与单个签名者一致（只有一个签名者时）
@@ -300,15 +308,17 @@ fn verify_unknown_issuer_reports_untrusted() {
 
     // 使用空的信任根
     let verifier = SignatureVerifier::with_trusted_roots(TrustedRoots::new());
-    let result = verifier.verify_v2(&signing_block).expect("verify v2");
+    let result = verifier.verify_v2_with_digest(&signing_block, None).expect("verify v2");
 
     // 签名应有效，但不可信
     assert!(result.signature_valid, "signature should be valid");
+    // digest_valid is false when no digest context is provided
+    assert!(!result.digest_valid, "digest_valid should be false without digest context");
     assert!(!result.is_trusted, "should not be trusted without roots");
 
     // 检查警告信息
     let has_root_warning = result.warnings.iter()
-        .any(|w| w.contains("No trusted roots") || w.contains("Unknown issuer"));
+        .any(|w| w.contains("No trusted roots") || w.contains("Unknown issuer") || w.contains("Content integrity NOT verified"));
     assert!(
         has_root_warning || !result.is_trusted,
         "should warn about missing trust or report untrusted"

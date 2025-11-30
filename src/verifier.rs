@@ -611,9 +611,10 @@ impl SignatureVerifier {
                                 signer_result.digest_valid = true;
                             }
                         } else {
-                            // No digest context provided, skip digest verification
-                            signer_result.digest_valid = true;
-                            signer_result.warnings.push("Digest verification skipped: no computed digest provided".to_string());
+                            // No digest context provided - content integrity NOT verified
+                            // Security: digest_valid must be false when content is not verified
+                            signer_result.digest_valid = false;
+                            signer_result.warnings.push("Content integrity NOT verified: no computed digest provided. Use verify_v2_with_digest for full verification.".to_string());
                         }
                     }
 
@@ -666,16 +667,6 @@ impl SignatureVerifier {
         }
 
         Ok(VerifyResult::from_signers(signer_results))
-    }
-
-    /// Verify a V2 signature block (without digest verification)
-    ///
-    /// For backwards compatibility. Use `verify_v2_with_digest` for full verification.
-    ///
-    /// # Errors
-    /// Returns `VerifyError` if verification fails
-    pub fn verify_v2(&self, signing_block: &SigningBlock) -> Result<VerifyResult, VerifyError> {
-        self.verify_v2_with_digest(signing_block, None)
     }
 
     /// Verify a Source Stamp block
@@ -766,21 +757,6 @@ impl SignatureVerifier {
         Ok(VerifyResult::from_signers(signer_results))
     }
 
-    /// Verify both V2 and Source Stamp if present
-    ///
-    /// This method preserves full error information for both signature types,
-    /// allowing callers to distinguish between "signature not present" and
-    /// "signature verification failed".
-    ///
-    /// # Returns
-    /// A `VerifyAllResult` containing results for both V2 and Source Stamp
-    pub fn verify_all(&self, signing_block: &SigningBlock) -> VerifyAllResult {
-        VerifyAllResult {
-            v2: self.verify_v2(signing_block),
-            source_stamp: self.verify_source_stamp(signing_block),
-        }
-    }
-
     /// Verify both V2 and Source Stamp with digest verification
     ///
     /// This method preserves full error information for both signature types,
@@ -803,27 +779,6 @@ impl SignatureVerifier {
             source_stamp: self.verify_source_stamp(signing_block),
         }
     }
-}
-
-/// Quick verification function
-///
-/// # Errors
-/// Returns `VerifyError` if verification fails
-pub fn verify_signing_block(signing_block: &SigningBlock) -> Result<VerifyResult, VerifyError> {
-    let verifier = SignatureVerifier::with_builtin_roots();
-    verifier.verify_v2(signing_block)
-}
-
-/// Quick verification with custom trusted roots
-///
-/// # Errors
-/// Returns `VerifyError` if verification fails
-pub fn verify_with_roots(
-    signing_block: &SigningBlock,
-    roots: TrustedRoots,
-) -> Result<VerifyResult, VerifyError> {
-    let verifier = SignatureVerifier::with_trusted_roots(roots);
-    verifier.verify_v2(signing_block)
 }
 
 /// Quick verification with digest context
