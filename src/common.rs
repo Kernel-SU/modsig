@@ -490,7 +490,8 @@ impl AdditionalAttribute {
         print_string!("tiny_raw_data_size: {}", size);
         let id = data.read_u32()?;
         add_space!(20);
-        print_string!("id: {} {}", id, MagicNumberDecoder::Normal(id));
+        #[cfg(feature = "directprint")]
+        println!("id: {} {}", id, MagicNumberDecoder::Normal(id));
         let data_size = match size.checked_sub(4) {
             Some(size) => size,
             None => return Err("Invalid size".to_string()),

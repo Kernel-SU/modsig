@@ -208,13 +208,18 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Display Source Stamp verification result
-    // Track if stamp digest verification failed (content integrity)
-    let mut stamp_digest_failed = false;
+    // Track if stamp verification failed (any aspect)
+    let mut stamp_verification_failed = false;
 
     match &stamp_result {
         Ok(result) => {
-            // Both signature AND digest must be valid for full verification
-            if result.signature_valid && result.digest_valid {
+            // ALL checks must pass: signature, digest, chain, and trust
+            let fully_valid = result.signature_valid
+                && result.digest_valid
+                && result.cert_chain_valid
+                && result.is_trusted;
+
+            if fully_valid {
                 println!("✓ Source Stamp verification passed");
                 println!("  Signature valid: {}", result.signature_valid);
                 println!("  Digest valid: {}", result.digest_valid);
@@ -227,28 +232,41 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
                         describe_certificate(cert)
                     );
                 }
-            } else if result.signature_valid && !result.digest_valid {
-                // Signature valid but digest mismatch - potential tampering!
-                eprintln!("⚠ Source Stamp signature valid but DIGEST MISMATCH!");
-                eprintln!("  Signature valid: {}", result.signature_valid);
-                eprintln!("  Digest valid: {} ← CONTENT INTEGRITY FAILED", result.digest_valid);
-                eprintln!("  Certificate chain valid: {}", result.cert_chain_valid);
-                eprintln!("  ⚠ WARNING: Module content may have been tampered with!");
-                if !result.warnings.is_empty() {
-                    for warning in &result.warnings {
-                        eprintln!("  ⚠ {}", warning);
-                    }
-                }
-                stamp_digest_failed = true;
             } else {
-                eprintln!("⚠ Source Stamp signature invalid");
+                // Determine what failed
+                let mut failure_reasons = Vec::new();
+                if !result.signature_valid {
+                    failure_reasons.push("signature invalid");
+                }
+                if !result.digest_valid {
+                    failure_reasons.push("digest mismatch (content integrity)");
+                }
+                if !result.cert_chain_valid {
+                    failure_reasons.push("certificate chain invalid");
+                }
+                if !result.is_trusted {
+                    failure_reasons.push("certificate not trusted");
+                }
+
+                eprintln!("⚠ Source Stamp verification FAILED: {}", failure_reasons.join(", "));
                 eprintln!("  Signature valid: {}", result.signature_valid);
                 eprintln!("  Digest valid: {}", result.digest_valid);
+                eprintln!("  Certificate chain valid: {}", result.cert_chain_valid);
+                eprintln!("  Trusted: {}", result.is_trusted);
+
+                if !result.digest_valid {
+                    eprintln!("  ⚠ WARNING: Module content may have been tampered with!");
+                }
+                if !result.is_trusted {
+                    eprintln!("  ⚠ WARNING: Certificate is not signed by a trusted root!");
+                }
+
                 if !result.warnings.is_empty() {
                     for warning in &result.warnings {
                         eprintln!("  ⚠ {}", warning);
                     }
                 }
+                stamp_verification_failed = true;
             }
         }
         Err(VerifyError::NoSignature) => {
@@ -259,25 +277,26 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
             for err in errors {
                 eprintln!("  ✗ {}", err);
             }
-            // Source Stamp verification failure is significant - warn strongly
             eprintln!("⚠ WARNING: Source Stamp present but verification failed!");
+            stamp_verification_failed = true;
         }
         Err(e) => {
             eprintln!("✗ Source Stamp verification error: {}", e);
-            // Source Stamp verification failure is significant - warn strongly
             eprintln!("⚠ WARNING: Source Stamp present but verification failed!");
+            stamp_verification_failed = true;
         }
     }
 
-    // Check if Source Stamp verification failed (error OR digest mismatch)
-    let stamp_failed = stamp_digest_failed || matches!(
-        &stamp_result,
-        Err(e) if !matches!(e, VerifyError::NoSignature)
-    );
+    // Check if Source Stamp verification failed (any reason except not present)
+    let stamp_failed = stamp_verification_failed;
 
-    // Overall result
-    if v2_result.is_some() && v2_result.as_ref().is_some_and(|r| r.signature_valid && r.digest_valid) {
-        println!();
+    // Overall result - V2 must pass ALL checks: signature, digest, chain, trust
+    let v2_fully_valid = v2_result.as_ref().is_some_and(|r| {
+        r.signature_valid && r.digest_valid && r.cert_chain_valid && r.is_trusted
+    });
+
+    println!();
+    if v2_fully_valid {
         if stamp_failed {
             println!("⚠ Module V2 signature verified, but Source Stamp verification FAILED!");
             println!("  V2 checks passed: signature, digest, chain, trust");
@@ -289,7 +308,24 @@ pub fn execute(args: VerifyArgs) -> Result<(), Box<dyn std::error::Error>> {
             println!("  All checks passed: signature, digest, chain, trust");
             Ok(())
         }
+    } else if v2_result.is_some() {
+        // V2 present but not fully valid
+        let r = v2_result.as_ref().unwrap();
+        let mut reasons = Vec::new();
+        if !r.signature_valid {
+            reasons.push("signature invalid");
+        }
+        if !r.digest_valid {
+            reasons.push("digest mismatch");
+        }
+        if !r.cert_chain_valid {
+            reasons.push("certificate chain invalid");
+        }
+        if !r.is_trusted {
+            reasons.push("certificate not trusted");
+        }
+        Err(format!("V2 signature verification failed: {}", reasons.join(", ")).into())
     } else {
-        Err("Module signature verification failed".into())
+        Err("Module signature verification failed: no V2 signature".into())
     }
 }

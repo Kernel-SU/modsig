@@ -113,17 +113,22 @@ pub struct VerifyAllResult {
 impl VerifyAllResult {
     /// Check if all present signatures are fully verified
     ///
-    /// Returns true only if all present signatures pass complete verification:
+    /// Returns true only if all present signatures pass **complete** verification:
     /// - Signature is cryptographically valid
+    /// - Digest matches computed content (content integrity)
     /// - Certificate chain is valid
     /// - Certificate is trusted (signed by a trusted root)
     ///
     /// Blocks that are not present (NoSignature) are ignored.
+    ///
+    /// **Important**: If you call verification without a digest context, `digest_valid`
+    /// will be false and this method will return false. Use `verify_all_with_digest`
+    /// with a proper `DigestContext` for complete verification.
     #[allow(clippy::missing_const_for_fn)] // matches! macro doesn't work in const context
     pub fn is_valid(&self) -> bool {
-        let v2_ok = matches!(&self.v2, Ok(r) if r.signature_valid && r.cert_chain_valid && r.is_trusted)
+        let v2_ok = matches!(&self.v2, Ok(r) if r.signature_valid && r.digest_valid && r.cert_chain_valid && r.is_trusted)
             || matches!(&self.v2, Err(VerifyError::NoSignature));
-        let stamp_ok = matches!(&self.source_stamp, Ok(r) if r.signature_valid && r.cert_chain_valid && r.is_trusted)
+        let stamp_ok = matches!(&self.source_stamp, Ok(r) if r.signature_valid && r.digest_valid && r.cert_chain_valid && r.is_trusted)
             || matches!(&self.source_stamp, Err(VerifyError::NoSignature));
         v2_ok && stamp_ok
     }
