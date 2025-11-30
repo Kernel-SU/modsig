@@ -63,6 +63,11 @@ impl Module {
     }
 
     /// Decode the signing block of the Module file.
+    ///
+    /// The signing block is located between the ZIP content and the Central Directory.
+    /// This method first parses the EOCD to find the Central Directory offset,
+    /// then searches for the signing block before that position.
+    ///
     /// # Errors
     /// Returns a string if the decoding fails.
     pub fn get_signing_block(&self) -> Result<SigningBlock, std::io::Error> {
@@ -75,8 +80,19 @@ impl Module {
                         "Module is raw",
                     ));
                 }
+
+                // First, find the EOCD to locate the Central Directory
+                // The signing block is located BEFORE the Central Directory, not at the file end
+                // Structure: [ZIP Content] → [Signing Block] → [Central Directory] → [EOCD]
+                let eocd = self.find_eocd()?;
+                let cd_offset = eocd.cd_offset as usize;
+
+                // Calculate end_offset: how far from file end is the Central Directory start
+                // This tells from_reader to stop searching at the Central Directory position
+                let end_offset = self.file_len.saturating_sub(cd_offset);
+
                 let file = File::open(&self.path)?;
-                let sig = SigningBlock::from_reader(file, self.file_len, 0)?;
+                let sig = SigningBlock::from_reader(file, self.file_len, end_offset)?;
                 Ok(sig)
             }
         }

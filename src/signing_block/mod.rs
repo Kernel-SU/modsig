@@ -308,6 +308,16 @@ impl SigningBlock {
     }
 
     /// Extract the KSU Signing Block from the Module file
+    ///
+    /// The signing block is located between ZIP content and Central Directory:
+    /// `[ZIP Content] → [Signing Block] → [Central Directory] → [EOCD]`
+    ///
+    /// # Arguments
+    /// * `reader` - File reader
+    /// * `file_len` - Total file length
+    /// * `end_offset` - Distance from file end to the Central Directory start.
+    ///   The signing block ends at `file_len - end_offset`.
+    ///
     /// # Errors
     /// Return an error appends during decoding
     pub fn from_reader<R: Read + Seek>(
@@ -315,11 +325,15 @@ impl SigningBlock {
         file_len: usize,
         end_offset: usize,
     ) -> Result<Self, std::io::Error> {
-        // Read a window from the end of file into memory for efficient searching
+        // The signing block ends at cd_offset (= file_len - end_offset)
+        // We search backwards from cd_offset to find the magic number
+        let search_end_pos = file_len.saturating_sub(end_offset);
+
         // Max signing block size is typically limited; use a reasonable window size
         const MAX_WINDOW_SIZE: usize = 16 * 1024 * 1024; // 16 MB max window
-        let search_len = file_len.saturating_sub(end_offset);
-        let window_size = search_len.min(MAX_WINDOW_SIZE);
+
+        // Window covers [window_start, search_end_pos]
+        let window_size = search_end_pos.min(MAX_WINDOW_SIZE);
 
         if window_size < MAGIC_LEN + SIZE_UINT64 {
             return Err(std::io::Error::other(
@@ -327,15 +341,16 @@ impl SigningBlock {
             ));
         }
 
-        // Read the tail window into memory
-        let window_start = file_len - window_size;
+        // Read window ending at search_end_pos (right before Central Directory)
+        let window_start = search_end_pos.saturating_sub(window_size);
         reader.seek(SeekFrom::Start(window_start as u64))?;
         let mut window = vec![0u8; window_size];
         reader.read_exact(&mut window)?;
 
         // Search backwards in memory for the magic number
-        // Start searching from (window_size - end_offset - MAGIC_LEN) position
-        let search_start = window_size.saturating_sub(end_offset + MAGIC_LEN);
+        // Magic should be at the end of the signing block, right before Central Directory
+        // Start from the end of window and search backwards
+        let search_start = window_size.saturating_sub(MAGIC_LEN);
         for pos in (0..=search_start).rev() {
             let magic_slice = match window.get(pos..pos + MAGIC_LEN) {
                 Some(s) => s,
@@ -361,10 +376,38 @@ impl SigningBlock {
                 let block_start_in_window = match block_end_in_window.checked_sub(block_size + SIZE_UINT64) {
                     Some(v) => v,
                     None => {
-                        return Err(std::io::Error::other(format!(
-                            "Error: block size {} is larger than available data",
-                            block_size
-                        )));
+                        // Block extends beyond window - need to read from file
+                        // This happens when signing block is larger than window
+                        let block_start_in_file = (window_start + block_end_in_window)
+                            .checked_sub(block_size + SIZE_UINT64);
+                        if block_start_in_file.is_none() {
+                            return Err(std::io::Error::other(format!(
+                                "Error: block size {} is larger than available data",
+                                block_size
+                            )));
+                        }
+                        let block_start_in_file = block_start_in_file.unwrap_or(0);
+                        let file_offset_end = window_start + block_end_in_window;
+
+                        // Read the full block from file
+                        let mut vec_full_block = vec![0u8; block_size + SIZE_UINT64];
+                        reader.seek(SeekFrom::Start(block_start_in_file as u64))?;
+                        reader.read_exact(&mut vec_full_block)?;
+
+                        print_string!("--- Start of Signature Block ---");
+                        let mut sig = match Self::parse_full_block(&vec_full_block) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                return Err(std::io::Error::other(format!(
+                                    "Error parsing full block: {}",
+                                    e
+                                )));
+                            }
+                        };
+                        sig.file_offset_start = block_start_in_file;
+                        sig.file_offset_end = file_offset_end;
+                        print_string!("--- End of Signature Block ---");
+                        return Ok(sig);
                     }
                 };
 
