@@ -673,13 +673,21 @@ impl SignatureVerifier {
         Ok(VerifyResult::from_signers(signer_results))
     }
 
-    /// Verify a Source Stamp block
+    /// Verify a Source Stamp block with digest verification
+    ///
+    /// This method verifies the Source Stamp signature AND checks that the stored
+    /// digests match the computed content digests.
+    ///
+    /// # Arguments
+    /// * `signing_block` - The signing block containing the Source Stamp
+    /// * `digest_context` - Optional computed digests for content verification
     ///
     /// # Errors
     /// Returns `VerifyError` if verification fails
-    pub fn verify_source_stamp(
+    pub fn verify_source_stamp_with_digest(
         &self,
         signing_block: &SigningBlock,
+        digest_context: Option<&DigestContext>,
     ) -> Result<VerifyResult, VerifyError> {
         let mut signer_results = Vec::new();
 
@@ -705,19 +713,59 @@ impl SignatureVerifier {
                     }
                 };
 
-                // Verify each signature
+                // Verify each signature and digest
                 let mut sig_valid = true;
+                let mut digest_verified = false;
+
                 for sig in &stamp_block.signatures.signatures_data {
                     let algo = &sig.signature_algorithm_id;
+
+                    // Verify signature
                     if let Err(e) = algo.verify(pubkey, raw_data, &sig.signature) {
                         signer_result.error = Some(format!("Signature verification failed: {}", e));
                         sig_valid = false;
                         break;
                     }
+
+                    // Find and verify digest by algorithm ID (like V2 verification)
+                    let digest = stamp_block
+                        .signed_data
+                        .digests
+                        .digests_data
+                        .iter()
+                        .find(|d| d.signature_algorithm_id == *algo);
+
+                    if let Some(digest_entry) = digest {
+                        // Verify digest against computed content (if provided)
+                        if let Some(ctx) = digest_context {
+                            let algo_id = algo.to_u32();
+                            if !ctx.verify_digest(algo_id, &digest_entry.digest) {
+                                signer_result.error = Some("Source Stamp digest mismatch: stored digest doesn't match computed file content".to_string());
+                                signer_result.digest_valid = false;
+                            } else {
+                                signer_result.digest_valid = true;
+                                digest_verified = true;
+                            }
+                        }
+                    }
+                }
+
+                // If no digest context provided, content integrity is NOT verified
+                if digest_context.is_none() {
+                    signer_result.digest_valid = false;
+                    signer_result.warnings.push(
+                        "Source Stamp content integrity NOT verified: no computed digest provided."
+                            .to_string(),
+                    );
+                } else if !digest_verified && signer_result.error.is_none() {
+                    // Digest context was provided but no matching digest found
+                    signer_result.digest_valid = false;
+                    signer_result.warnings.push(
+                        "No matching digest found in Source Stamp for verification.".to_string(),
+                    );
                 }
 
                 signer_result.signature_valid = sig_valid && signer_result.error.is_none();
-                signer_result.digest_valid = true; // Source stamp doesn't have separate digest verification
 
                 // Get certificate
                 if let Some(cert) = stamp_block
@@ -761,6 +809,22 @@ impl SignatureVerifier {
         Ok(VerifyResult::from_signers(signer_results))
     }
 
+    /// Verify a Source Stamp block (without digest verification)
+    ///
+    /// **Warning**: This method only verifies the signature, NOT the content integrity.
+    /// For full verification including digest checks, use `verify_source_stamp_with_digest`.
+    ///
+    /// # Errors
+    /// Returns `VerifyError` if verification fails
+    pub fn verify_source_stamp(
+        &self,
+        signing_block: &SigningBlock,
+    ) -> Result<VerifyResult, VerifyError> {
+        // Call the full verification without digest context
+        // This will set digest_valid = false and add a warning
+        self.verify_source_stamp_with_digest(signing_block, None)
+    }
+
     /// Verify both V2 and Source Stamp with digest verification
     ///
     /// This method preserves full error information for both signature types,
@@ -780,7 +844,7 @@ impl SignatureVerifier {
     ) -> VerifyAllResult {
         VerifyAllResult {
             v2: self.verify_v2_with_digest(signing_block, digest_context),
-            source_stamp: self.verify_source_stamp(signing_block),
+            source_stamp: self.verify_source_stamp_with_digest(signing_block, digest_context),
         }
     }
 }

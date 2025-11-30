@@ -386,7 +386,9 @@ impl ModuleSigner {
 
     /// Add source stamp to an existing signing block
     ///
-    /// This is useful for re-signing a module with a source stamp
+    /// This is useful for re-signing a module with a source stamp.
+    /// The signing block will be rebuilt with proper 4K alignment padding
+    /// if `padding_enabled` is true (default).
     ///
     /// # Arguments
     /// * `existing_block` - The existing signing block
@@ -396,9 +398,11 @@ impl ModuleSigner {
     /// Returns an error if no stamp config is set or signing fails
     pub fn add_source_stamp(
         &self,
-        mut existing_block: SigningBlock,
+        existing_block: SigningBlock,
         digests: Digests,
     ) -> Result<SigningBlock, String> {
+        use crate::signing_block::VERITY_PADDING_BLOCK_ID;
+
         let stamp_config = self
             .stamp_config
             .as_ref()
@@ -416,20 +420,26 @@ impl ModuleSigner {
 
         let stamp_block = stamp_signer.sign(digests)?;
 
-        // Remove existing source stamp if present
-        existing_block
+        // Collect all blocks except Source Stamp and Padding (we'll regenerate padding)
+        let mut new_content: Vec<ValueSigningBlock> = existing_block
             .content
-            .retain(|block| !matches!(block, ValueSigningBlock::SourceStampBlock(_)));
+            .into_iter()
+            .filter(|block| {
+                !matches!(block, ValueSigningBlock::SourceStampBlock(_))
+                    && block.id() != VERITY_PADDING_BLOCK_ID
+            })
+            .collect();
 
         // Add new source stamp
-        existing_block
-            .content
-            .push(ValueSigningBlock::SourceStampBlock(stamp_block));
+        new_content.push(ValueSigningBlock::SourceStampBlock(stamp_block));
 
-        // Recalculate size
-        existing_block.recalculate_size();
-
-        Ok(existing_block)
+        // Rebuild the signing block with proper padding if enabled
+        if self.padding_enabled {
+            SigningBlock::new_with_padding(new_content)
+                .map_err(|e| format!("Failed to create padded signing block: {}", e))
+        } else {
+            Ok(SigningBlock::new(new_content))
+        }
     }
 }
 
