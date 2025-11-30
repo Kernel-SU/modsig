@@ -23,8 +23,9 @@ pem = { version = "3.0", optional = true }
 pkcs8 = { version = "0.10", features = ["encryption", "pem"], optional = true }
 p12 = { version = "0.6", optional = true }
 x509-cert = { version = "0.2", optional = true }
-# certificate chain verification
-webpki = { version = "0.22", optional = true }
+# certificate chain verification (using rustls-webpki for proper chain validation)
+rustls-webpki = { version = "0.103", default-features = false, features = ["ring"], optional = true }
+rustls-pki-types = { version = "1.0", optional = true }
 # CLI framework
 clap = { version = "4.5", features = ["derive", "cargo"] }
 base64 = "0.22"
@@ -60,8 +61,8 @@ signing = ["hash", "dep:p256", "dep:p384"]
 # keystore support (PEM and P12 format)
 keystore = ["signing", "dep:pem", "dep:pkcs8", "dep:p12", "dep:x509-cert"]
 
-# certificate chain verification
-verify = ["signing", "dep:x509-cert"]
+# certificate chain verification (with real signature validation)
+verify = ["signing", "dep:x509-cert", "dep:rustls-webpki", "dep:rustls-pki-types"]
 
 # allows to serialize and deserialize structs with serde
 serde = ["dep:serde"]

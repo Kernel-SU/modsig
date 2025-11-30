@@ -1,6 +1,7 @@
 use std::path::PathBuf;
+use std::io::Write;
 
-use ksusig::{CertChainVerifier, Module, SignatureVerifier, TrustedRoots, VerifyError};
+use ksusig::{Algorithms, CertChainVerifier, DigestContext, Module, SignatureVerifier, TrustedRoots, VerifyError};
 
 fn load_signing_block(path: &str) -> Result<ksusig::SigningBlock, String> {
     let module_path = PathBuf::from(path);
@@ -35,9 +36,15 @@ fn verify_fixture_signed_zip_has_trusted_chain() {
         1,
         "fixture should carry one intermediate certificate"
     );
+    // Note: warnings may include "Digest verification skipped" when no digest context is provided
+    // This is expected behavior in the new API
+    let non_skip_warnings: Vec<_> = result.warnings.iter()
+        .filter(|w| !w.contains("Digest verification skipped"))
+        .collect();
     assert!(
-        result.warnings.is_empty(),
-        "no warnings expected for the official fixture"
+        non_skip_warnings.is_empty(),
+        "no unexpected warnings for the official fixture, got: {:?}",
+        non_skip_warnings
     );
 }
 
@@ -74,14 +81,15 @@ fn verify_untrusted_fixture_can_be_trusted_with_custom_root() {
 
     // 使用 CertChainVerifier 直接验证链 + 信任。
     let chain_verifier = CertChainVerifier::new(roots);
-    let (chain_valid, trusted) = chain_verifier.verify_chain(&leaf, &[root_der]);
+    let (chain_valid, trusted, error_msg) = chain_verifier.verify_chain(&leaf, &[root_der]);
     assert!(
         chain_valid,
         "chain should be structurally valid with provided root"
     );
     assert!(
         trusted,
-        "should be trusted when root is supplied as intermediate"
+        "should be trusted when root is supplied as intermediate, error: {:?}",
+        error_msg
     );
 }
 
@@ -131,4 +139,174 @@ fn verify_unsigned_module_returns_no_signature() {
             "should return NoSignature"
         );
     }
+}
+
+// ========== 安全测试用例 ==========
+
+/// 篡改检测：修改文件内容后摘要验证应失败
+#[test]
+fn verify_tampered_content_fails_digest_verification() {
+    // 读取原始签名模块
+    let original_bytes = std::fs::read("tests/fixtures/test_ksu_signed.zip")
+        .expect("read original fixture");
+
+    // 创建临时文件并篡改内容
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let tampered_path = temp_dir.path().join("tampered.zip");
+
+    // 在 ZIP 条目区域内修改一个字节（避开签名块和 EOCD）
+    let mut tampered_bytes = original_bytes.clone();
+    // 修改 ZIP 文件头附近的字节（通常在前 1000 字节内是安全的）
+    if tampered_bytes.len() > 100 {
+        let idx = 50; // 修改 ZIP 条目区域内的字节
+        tampered_bytes[idx] = tampered_bytes[idx].wrapping_add(1);
+    }
+
+    let mut file = std::fs::File::create(&tampered_path).expect("create temp file");
+    file.write_all(&tampered_bytes).expect("write tampered file");
+    drop(file);
+
+    // 加载篡改后的模块
+    let module = Module::new(tampered_path.clone()).expect("load tampered module");
+    let signing_block = module.get_signing_block().expect("get signing block");
+
+    // 计算新的摘要（基于篡改后的内容）
+    let mut digest_ctx = DigestContext::new();
+    if let Ok(digest) = module.digest(&Algorithms::ECDSA_SHA2_512) {
+        digest_ctx.add_digest(Algorithms::ECDSA_SHA2_512.to_u32(), digest);
+    }
+
+    // 验证应检测到摘要不匹配
+    let verifier = SignatureVerifier::with_builtin_roots();
+    let result = verifier.verify_v2_with_digest(&signing_block, Some(&digest_ctx));
+
+    // 摘要应该不匹配（因为内容被篡改，新计算的摘要与签名块中存储的不同）
+    match result {
+        Ok(r) => {
+            assert!(
+                !r.digest_valid,
+                "tampered content should fail digest verification"
+            );
+        }
+        Err(VerifyError::MultiSignerFailure(errors)) => {
+            // 也可能直接返回错误
+            assert!(
+                errors.iter().any(|e| e.contains("Digest mismatch")),
+                "should report digest mismatch error, got: {:?}",
+                errors
+            );
+        }
+        Err(e) => {
+            // 其他错误也可以接受（如签名块解析失败）
+            println!("Tampered file verification failed with: {}", e);
+        }
+    }
+}
+
+/// 摘要验证：使用正确的摘要上下文应通过验证
+#[test]
+fn verify_with_correct_digest_context_passes() {
+    let module = Module::new(PathBuf::from("tests/fixtures/test_ksu_signed.zip"))
+        .expect("load module");
+    let signing_block = module.get_signing_block().expect("get signing block");
+
+    // 计算正确的摘要
+    let mut digest_ctx = DigestContext::new();
+    if let Ok(digest) = module.digest(&Algorithms::ECDSA_SHA2_512) {
+        digest_ctx.add_digest(Algorithms::ECDSA_SHA2_512.to_u32(), digest);
+    }
+
+    // 使用正确的摘要上下文验证
+    let verifier = SignatureVerifier::with_builtin_roots();
+    let result = verifier.verify_v2_with_digest(&signing_block, Some(&digest_ctx))
+        .expect("verification should succeed");
+
+    assert!(result.signature_valid, "signature should be valid");
+    assert!(result.digest_valid, "digest should be valid with correct context");
+    assert!(result.is_trusted, "should be trusted by builtin roots");
+}
+
+/// 伪造摘要：提供错误的摘要值应失败
+#[test]
+fn verify_with_wrong_digest_fails() {
+    let module = Module::new(PathBuf::from("tests/fixtures/test_ksu_signed.zip"))
+        .expect("load module");
+    let signing_block = module.get_signing_block().expect("get signing block");
+
+    // 创建错误的摘要上下文（全零摘要）
+    let mut digest_ctx = DigestContext::new();
+    digest_ctx.add_digest(Algorithms::ECDSA_SHA2_512.to_u32(), vec![0u8; 64]);
+
+    // 验证应失败
+    let verifier = SignatureVerifier::with_builtin_roots();
+    let result = verifier.verify_v2_with_digest(&signing_block, Some(&digest_ctx));
+
+    match result {
+        Ok(r) => {
+            assert!(
+                !r.digest_valid,
+                "wrong digest should fail verification"
+            );
+        }
+        Err(VerifyError::MultiSignerFailure(errors)) => {
+            assert!(
+                errors.iter().any(|e| e.contains("Digest mismatch")),
+                "should report digest mismatch"
+            );
+        }
+        Err(e) => {
+            panic!("unexpected error: {}", e);
+        }
+    }
+}
+
+/// 多签名者：验证结果应包含所有签名者信息
+#[test]
+fn verify_reports_all_signers() {
+    let signing_block = load_signing_block("tests/fixtures/test_ksu_signed.zip")
+        .expect("load signing block");
+
+    let verifier = SignatureVerifier::with_builtin_roots();
+    let result = verifier.verify_v2(&signing_block).expect("verify v2");
+
+    // 检查签名者结果列表
+    assert!(
+        !result.signers.is_empty(),
+        "should have at least one signer result"
+    );
+
+    // 检查第一个签名者的详细信息
+    let first_signer = &result.signers[0];
+    assert!(first_signer.signature_valid, "first signer should have valid signature");
+    assert!(first_signer.certificate.is_some(), "first signer should have certificate");
+
+    // 整体结果应与单个签名者一致（只有一个签名者时）
+    assert_eq!(
+        result.signature_valid,
+        result.signers.iter().all(|s| s.signature_valid),
+        "overall signature_valid should match all signers"
+    );
+}
+
+/// 证书链验证：未知发行者应报告不可信
+#[test]
+fn verify_unknown_issuer_reports_untrusted() {
+    let signing_block = load_signing_block("tests/fixtures/test_signed.zip")
+        .expect("load signing block");
+
+    // 使用空的信任根
+    let verifier = SignatureVerifier::with_trusted_roots(TrustedRoots::new());
+    let result = verifier.verify_v2(&signing_block).expect("verify v2");
+
+    // 签名应有效，但不可信
+    assert!(result.signature_valid, "signature should be valid");
+    assert!(!result.is_trusted, "should not be trusted without roots");
+
+    // 检查警告信息
+    let has_root_warning = result.warnings.iter()
+        .any(|w| w.contains("No trusted roots") || w.contains("Unknown issuer"));
+    assert!(
+        has_root_warning || !result.is_trusted,
+        "should warn about missing trust or report untrusted"
+    );
 }

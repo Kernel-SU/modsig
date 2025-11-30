@@ -102,6 +102,11 @@ fn sha512(data: &[u8]) -> Vec<u8> {
 }
 
 impl Algorithms {
+    /// Convert to u32 algorithm ID
+    pub fn to_u32(&self) -> u32 {
+        u32::from(self)
+    }
+
     /// Hash data
     #[cfg(feature = "hash")]
     pub fn hash(&self, data: &[u8]) -> Vec<u8> {
