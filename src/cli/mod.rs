@@ -2,10 +2,14 @@
 
 use clap::{Parser, Subcommand};
 
+#[cfg(feature = "verify")]
 pub mod cert;
 pub mod digest;
+#[cfg(feature = "verify")]
 pub mod info;
+#[cfg(feature = "keystore")]
 pub mod sign;
+#[cfg(feature = "verify")]
 pub mod verify;
 
 /// KSU Module signing tool
@@ -21,13 +25,16 @@ pub struct Cli {
 /// Available commands
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Sign a module
+    /// Sign a module (requires keystore feature)
+    #[cfg(feature = "keystore")]
     Sign(Box<sign::SignArgs>),
 
-    /// Verify module signature
+    /// Verify module signature (requires verify feature)
+    #[cfg(feature = "verify")]
     Verify(verify::VerifyArgs),
 
-    /// Display signing block information
+    /// Display signing block information (requires verify feature)
+    #[cfg(feature = "verify")]
     Info(info::InfoArgs),
 
     /// Calculate digest of signable regions
@@ -43,8 +50,11 @@ impl Cli {
     /// Execute command
     pub fn execute(self) -> Result<(), Box<dyn std::error::Error>> {
         match self.command {
+            #[cfg(feature = "keystore")]
             Commands::Sign(args) => sign::execute(*args),
+            #[cfg(feature = "verify")]
             Commands::Verify(args) => verify::execute(args),
+            #[cfg(feature = "verify")]
             Commands::Info(args) => info::execute(args),
             Commands::Digest(args) => digest::execute(args),
         }
