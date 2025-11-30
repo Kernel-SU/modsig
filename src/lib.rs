@@ -39,7 +39,7 @@ pub mod keystore;
 pub mod signer;
 
 #[cfg(feature = "verify")]
-pub mod verify;
+pub mod verifier;
 
 // re-export
 #[cfg(feature = "hash")]
@@ -74,7 +74,7 @@ pub use signer::{
 
 // Verify exports
 #[cfg(feature = "verify")]
-pub use verify::{
+pub use verifier::{
     verify_signing_block, verify_with_roots, CertChainVerifier, SignatureVerifier, TrustedRoots,
     VerifyError, VerifyResult,
 };
