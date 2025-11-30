@@ -221,11 +221,26 @@ pub struct SigningBlock {
 
 impl SigningBlock {
     /// Create a new SigningBlock without padding
-    pub fn new(content: Vec<ValueSigningBlock>) -> Self {
+    ///
+    /// # Errors
+    /// Returns an error if the resulting block exceeds `MAX_SIGNING_BLOCK_SIZE` (16 KB).
+    /// This ensures consistency with parsing limits to avoid creating files
+    /// that cannot be parsed back by this library.
+    pub fn new(content: Vec<ValueSigningBlock>) -> Result<Self, std::io::Error> {
         let content_size = content.iter().fold(0, |acc, x| acc + x.size());
         let size = content_size + SIZE_UINT64 + MAGIC_LEN;
         let total_size = SIZE_UINT64 + size;
-        Self {
+
+        // Validate size to ensure consistency with parsing limits
+        if size > MAX_SIGNING_BLOCK_SIZE {
+            return Err(std::io::Error::other(format!(
+                "Generated signing block size {} exceeds maximum allowed size {} (16 KB). \
+                 Reduce certificate chain size or number of signers.",
+                size, MAX_SIGNING_BLOCK_SIZE
+            )));
+        }
+
+        Ok(Self {
             file_offset_start: 0,
             file_offset_end: total_size,
             size_of_block_start: size,
@@ -233,7 +248,7 @@ impl SigningBlock {
             content,
             size_of_block_end: size,
             magic: *MAGIC,
-        }
+        })
     }
 
     /// Recalculate the size fields based on current content
@@ -250,9 +265,13 @@ impl SigningBlock {
         &mut self.content
     }
 
-    /// Create a new SigningBlock
+    /// Create a new SigningBlock with 4K alignment padding
+    ///
     /// # Errors
-    /// Return an error appends during creation of the block
+    /// Returns an error if:
+    /// - A padding block already exists in content
+    /// - The resulting block exceeds `MAX_SIGNING_BLOCK_SIZE` (16 KB)
+    /// - Padding calculation fails
     pub fn new_with_padding(content: Vec<ValueSigningBlock>) -> Result<Self, std::io::Error> {
         for c in &content {
             if c.id() == VERITY_PADDING_BLOCK_ID {
@@ -289,6 +308,16 @@ impl SigningBlock {
         let content_size = new_content.iter().fold(0, |acc, x| acc + x.size());
         let size = content_size + SIZE_UINT64 + MAGIC_LEN;
         let total_size = SIZE_UINT64 + size;
+
+        // Validate size to ensure consistency with parsing limits
+        if size > MAX_SIGNING_BLOCK_SIZE {
+            return Err(std::io::Error::other(format!(
+                "Generated signing block size {} exceeds maximum allowed size {} (16 KB). \
+                 Reduce certificate chain size or number of signers.",
+                size, MAX_SIGNING_BLOCK_SIZE
+            )));
+        }
+
         debug_assert!(total_size.is_multiple_of(4096));
         Ok(Self {
             file_offset_start: 0,

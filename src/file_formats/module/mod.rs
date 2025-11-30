@@ -131,14 +131,30 @@ impl Module {
         let mut digest_context = DigestContext::new();
 
         // Find all algorithms used in the signing block and compute digests
+        // Collect from both V2 signatures AND Source Stamp
         for block in &signing_block.content {
-            if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
-                for signer in &v2.signers.signers_data {
-                    for digest_entry in &signer.signed_data.digests.digests_data {
+            match block {
+                ValueSigningBlock::SignatureSchemeV2Block(v2) => {
+                    for signer in &v2.signers.signers_data {
+                        for digest_entry in &signer.signed_data.digests.digests_data {
+                            let algo = &digest_entry.signature_algorithm_id;
+                            let algo_id = algo.to_u32();
+
+                            // Only compute if not already present
+                            if digest_context.get_digest(algo_id).is_none() {
+                                if let Ok(computed) = self.digest(algo) {
+                                    digest_context.add_digest(algo_id, computed);
+                                }
+                            }
+                        }
+                    }
+                }
+                ValueSigningBlock::SourceStampBlock(stamp) => {
+                    // Also collect algorithms from Source Stamp
+                    for digest_entry in &stamp.stamp_block.signed_data.digests.digests_data {
                         let algo = &digest_entry.signature_algorithm_id;
                         let algo_id = algo.to_u32();
 
-                        // Only compute if not already present
                         if digest_context.get_digest(algo_id).is_none() {
                             if let Ok(computed) = self.digest(algo) {
                                 digest_context.add_digest(algo_id, computed);
@@ -146,6 +162,7 @@ impl Module {
                         }
                     }
                 }
+                _ => {}
             }
         }
 
@@ -185,14 +202,30 @@ impl Module {
         let mut digest_context = DigestContext::new();
 
         // Find all algorithms used in the signing block and compute digests
+        // Collect from both V2 signatures AND Source Stamp
         for block in &signing_block.content {
-            if let ValueSigningBlock::SignatureSchemeV2Block(v2) = block {
-                for signer in &v2.signers.signers_data {
-                    for digest_entry in &signer.signed_data.digests.digests_data {
+            match block {
+                ValueSigningBlock::SignatureSchemeV2Block(v2) => {
+                    for signer in &v2.signers.signers_data {
+                        for digest_entry in &signer.signed_data.digests.digests_data {
+                            let algo = &digest_entry.signature_algorithm_id;
+                            let algo_id = algo.to_u32();
+
+                            // Only compute if not already present
+                            if digest_context.get_digest(algo_id).is_none() {
+                                if let Ok(computed) = self.digest(algo) {
+                                    digest_context.add_digest(algo_id, computed);
+                                }
+                            }
+                        }
+                    }
+                }
+                ValueSigningBlock::SourceStampBlock(stamp) => {
+                    // Also collect algorithms from Source Stamp
+                    for digest_entry in &stamp.stamp_block.signed_data.digests.digests_data {
                         let algo = &digest_entry.signature_algorithm_id;
                         let algo_id = algo.to_u32();
 
-                        // Only compute if not already present
                         if digest_context.get_digest(algo_id).is_none() {
                             if let Ok(computed) = self.digest(algo) {
                                 digest_context.add_digest(algo_id, computed);
@@ -200,6 +233,7 @@ impl Module {
                         }
                     }
                 }
+                _ => {}
             }
         }
 

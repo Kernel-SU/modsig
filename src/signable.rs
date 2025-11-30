@@ -330,16 +330,28 @@ impl Signable for Module {
 
         let (raw_bytes, mut eocd) = match Self::get_signing_block(self) {
             Ok(_) => {
+                // Existing valid signature - strip it via get_raw_module
                 let bytes = Self::get_raw_module(self)?;
                 let mut cursor = Cursor::new(&bytes);
                 let eocd = find_eocd(&mut cursor, bytes.len())?;
                 (bytes, eocd)
             }
-            Err(_) => {
+            Err(err) if maybe_missing_signature(&err) => {
+                // No signature exists (raw file) - use file as-is
                 let bytes = std::fs::read(&self.path)?;
                 let mut cursor = Cursor::new(&bytes);
                 let eocd = find_eocd(&mut cursor, bytes.len())?;
                 (bytes, eocd)
+            }
+            Err(err) => {
+                // Corrupted/invalid signature block - refuse to sign
+                // This prevents creating files with layout: [old corrupted block + new block + CD + EOCD]
+                // which would produce unverifiable output
+                return Err(SignableError::Parse(format!(
+                    "Cannot sign file with corrupted signing block: {}. \
+                     Please remove the corrupted block first or use a clean unsigned file.",
+                    err
+                )));
             }
         };
 
